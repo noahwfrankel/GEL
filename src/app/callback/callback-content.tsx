@@ -71,6 +71,7 @@ export function CallbackContent() {
             expires_in: data.expires_in,
           })
         );
+        localStorage.setItem("gel_spotify_connected", "true");
       }
 
       setStatus("success");
