@@ -9,68 +9,14 @@ import {
 
 const FEET_OPTIONS = [4, 5, 6, 7];
 const INCHES_OPTIONS = Array.from({ length: 12 }, (_, i) => i);
-const WEIGHT_OPTIONS = Array.from({ length: 351 }, (_, i) => i + 50);
+const WEIGHT_OPTIONS = Array.from({ length: 71 }, (_, i) => 50 + i * 5);
 const FIT_OPTIONS = ["Menswear", "Womenswear", "Unisex"] as const;
 
 const WELCOME_HOLD_MS = 2000;
 const LOADING_HOLD_MS = 1500;
 
-function ScrollPicker<T>({
-  options,
-  value,
-  onChange,
-  format = (v) => String(v),
-  itemHeight = 44,
-}: {
-  options: T[];
-  value: T;
-  onChange: (v: T) => void;
-  format?: (v: T) => string;
-  itemHeight?: number;
-}) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const idx = options.indexOf(value);
-    if (idx >= 0) el.scrollTop = idx * itemHeight;
-  }, [options, value, itemHeight]);
-
-  const handleScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const idx = Math.round(el.scrollTop / itemHeight);
-    const clamped = Math.max(0, Math.min(idx, options.length - 1));
-    if (options[clamped] !== value) onChange(options[clamped]);
-  };
-
-  return (
-    <div className="relative flex-1" style={{ maxHeight: itemHeight * 5 }}>
-      <div
-        className="absolute left-0 right-0 rounded-lg bg-white/10 pointer-events-none z-0"
-        style={{ top: itemHeight * 2, height: itemHeight }}
-      />
-      <div
-        ref={scrollRef}
-        className="relative z-10 overflow-y-auto snap-y snap-mandatory scrollbar-hide h-full"
-        onScroll={handleScroll}
-      >
-        <div style={{ height: itemHeight * 2 }} className="shrink-0" />
-        {options.map((opt) => (
-          <div
-            key={format(opt)}
-            className="snap-center flex items-center justify-center text-white text-lg py-2"
-            style={{ height: itemHeight }}
-          >
-            {format(opt)}
-          </div>
-        ))}
-        <div style={{ height: itemHeight * 2 }} className="shrink-0" />
-      </div>
-    </div>
-  );
-}
+const selectClassName =
+  "w-full rounded-lg border border-white/20 bg-white/5 px-4 py-3 text-white focus:border-[#1DB954] focus:outline-none focus:ring-1 focus:ring-[#1DB954]";
 
 export default function HomePage() {
   const [mounted, setMounted] = useState(false);
@@ -208,37 +154,77 @@ export default function HomePage() {
             <p className="text-zinc-400 text-sm mb-6">
               We use this to recommend better fits.
             </p>
-            <div className="flex gap-6 flex-1">
-              <div className="flex-1">
-                <p className="text-zinc-500 text-sm mb-1">Height</p>
-                <div className="flex gap-2 items-center">
-                  <div className="flex-1 relative">
-                    <div className="relative flex gap-1">
-                      <ScrollPicker
-                        options={FEET_OPTIONS}
-                        value={heightFeet}
-                        onChange={setHeightFeet}
-                        format={(v) => `${v} ft`}
-                      />
-                      <ScrollPicker
-                        options={INCHES_OPTIONS}
-                        value={heightInches}
-                        onChange={setHeightInches}
-                        format={(v) => `${v} in`}
-                      />
-                    </div>
-                  </div>
+            <div className="space-y-6">
+              <div>
+                <p className="text-zinc-500 text-sm mb-2">Height</p>
+                <div className="flex gap-3">
+                  <label className="flex-1">
+                    <span className="sr-only">Feet</span>
+                    <select
+                      value={heightFeet}
+                      onChange={(e) =>
+                        setHeightFeet(Number(e.target.value))
+                      }
+                      className={selectClassName}
+                      aria-label="Height (feet)"
+                    >
+                      {FEET_OPTIONS.map((ft) => (
+                        <option
+                          key={ft}
+                          value={ft}
+                          className="bg-[#1a1a1a] text-white"
+                        >
+                          {ft} ft
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex-1">
+                    <span className="sr-only">Inches</span>
+                    <select
+                      value={heightInches}
+                      onChange={(e) =>
+                        setHeightInches(Number(e.target.value))
+                      }
+                      className={selectClassName}
+                      aria-label="Height (inches)"
+                    >
+                      {INCHES_OPTIONS.map((inVal) => (
+                        <option
+                          key={inVal}
+                          value={inVal}
+                          className="bg-[#1a1a1a] text-white"
+                        >
+                          {inVal} in
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
               </div>
-              <div className="flex-1">
-                <p className="text-zinc-500 text-sm mb-1">Weight (lbs)</p>
-                <div className="relative">
-                  <ScrollPicker
-                    options={WEIGHT_OPTIONS}
+              <div>
+                <p className="text-zinc-500 text-sm mb-2">Weight (lbs)</p>
+                <label className="block">
+                  <span className="sr-only">Weight in pounds</span>
+                  <select
                     value={weightLbs}
-                    onChange={setWeightLbs}
-                  />
-                </div>
+                    onChange={(e) =>
+                      setWeightLbs(Number(e.target.value))
+                    }
+                    className={selectClassName}
+                    aria-label="Weight (lbs)"
+                  >
+                    {WEIGHT_OPTIONS.map((lbs) => (
+                      <option
+                        key={lbs}
+                        value={lbs}
+                        className="bg-[#1a1a1a] text-white"
+                      >
+                        {lbs} lbs
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
             </div>
           </div>
