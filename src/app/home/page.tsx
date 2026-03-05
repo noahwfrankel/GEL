@@ -91,6 +91,10 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    console.log("Phase changed to:", phase);
+  }, [phase]);
+
+  useEffect(() => {
     if (!mounted) return;
     if (isOnboardingComplete()) {
       setPhase(3);
