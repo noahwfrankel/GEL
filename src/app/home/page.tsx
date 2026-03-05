@@ -11,7 +11,9 @@ const FEET_OPTIONS = [4, 5, 6, 7];
 const INCHES_OPTIONS = Array.from({ length: 12 }, (_, i) => i);
 const WEIGHT_OPTIONS = Array.from({ length: 351 }, (_, i) => i + 50);
 const FIT_OPTIONS = ["Menswear", "Womenswear", "Unisex"] as const;
-const WELCOME_DURATION_MS = 2000;
+
+const WELCOME_HOLD_MS = 2000;
+const LOADING_HOLD_MS = 1500;
 
 function ScrollPicker<T>({
   options,
@@ -72,7 +74,8 @@ function ScrollPicker<T>({
 
 export default function HomePage() {
   const [mounted, setMounted] = useState(false);
-  const [phase, setPhase] = useState<-1 | 0 | 1 | 2 | 3>(-1);
+  const [phase, setPhase] = useState<-3 | -2 | -1 | 0 | 1 | 2 | 3>(-3);
+  const sequenceStartedRef = useRef(false);
 
   const [heightFeet, setHeightFeet] = useState(5);
   const [heightInches, setHeightInches] = useState(8);
@@ -93,14 +96,22 @@ export default function HomePage() {
       setPhase(3);
       return;
     }
+    if (sequenceStartedRef.current) return;
+    sequenceStartedRef.current = true;
     setPhase(-1);
   }, [mounted]);
 
   useEffect(() => {
-    if (phase !== -1) return;
-    const t = setTimeout(() => setPhase(0), WELCOME_DURATION_MS);
-    return () => clearTimeout(t);
-  }, [phase]);
+    if (!mounted || phase === 3 || phase >= 0 || phase === -3) return;
+    if (phase === -1) {
+      const t = setTimeout(() => setPhase(-2), WELCOME_HOLD_MS);
+      return () => clearTimeout(t);
+    }
+    if (phase === -2) {
+      const t = setTimeout(() => setPhase(0), LOADING_HOLD_MS);
+      return () => clearTimeout(t);
+    }
+  }, [mounted, phase]);
 
   const toggleFit = (fit: (typeof FIT_OPTIONS)[number]) => {
     setFitPreferences((prev) =>
@@ -141,10 +152,20 @@ export default function HomePage() {
   }
 
   const showWelcome = phase === -1;
+  const showLoading = phase === -2;
   const showStep0 = phase === 0;
   const showStep1 = phase === 1;
   const showStep2 = phase === 2;
   const showHome = phase === 3;
+  const waitingToStart = phase === -3;
+
+  if (waitingToStart) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#0d0d0d]">
+        <div className="h-10 w-48 animate-pulse rounded bg-white/10" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0d0d0d] px-6 pb-12 pt-16">
@@ -152,11 +173,26 @@ export default function HomePage() {
         {showWelcome && (
           <div
             key="welcome"
-            className="flex flex-col items-center justify-center flex-1 text-center animate-fade-in"
+            className="flex flex-col items-center justify-center flex-1 text-center animate-fade-in-slow"
           >
             <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
               Welcome to GEL
             </h1>
+          </div>
+        )}
+
+        {showLoading && (
+          <div
+            key="loading"
+            className="flex flex-col items-center justify-center flex-1 text-center animate-fade-in"
+          >
+            <div
+              className="w-10 h-10 rounded-full border-2 border-white/30 border-t-white animate-spin-slow mb-6"
+              aria-hidden
+            />
+            <p className="text-zinc-400 text-center max-w-xs">
+              Answer a few questions while we read your music
+            </p>
           </div>
         )}
 

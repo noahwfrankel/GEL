@@ -34,8 +34,22 @@ body {
   }
 }
 
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.4s ease-out forwards;
+}
+
+.animate-fade-in-slow {
+  animation: fadeIn 1s ease-out forwards;
+}
+
+.animate-spin-slow {
+  animation: spin 1s linear infinite;
 }
 
 @layer utilities {
