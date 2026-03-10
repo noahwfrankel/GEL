@@ -143,20 +143,16 @@ export async function fetchAndStoreSpotifyData(): Promise<SpotifyData | null> {
 
   for (const range of TIME_RANGES) {
     const url = `${SPOTIFY_API_BASE}/me/top/artists?time_range=${range}&limit=50`;
-    const { data, newToken } = await spotifyFetch<{ items: unknown[] }>(
-      url,
-      token
-    );
+    const { data, newToken }: { data: { items: unknown[] }; newToken: string | null } =
+      await spotifyFetch<{ items: unknown[] }>(url, token);
     if (newToken) token = newToken;
     topArtists[range] = data.items ?? [];
   }
 
   for (const range of TIME_RANGES) {
     const url = `${SPOTIFY_API_BASE}/me/top/tracks?time_range=${range}&limit=50`;
-    const { data, newToken } = await spotifyFetch<{ items: unknown[] }>(
-      url,
-      token
-    );
+    const { data, newToken }: { data: { items: unknown[] }; newToken: string | null } =
+      await spotifyFetch<{ items: unknown[] }>(url, token);
     if (newToken) token = newToken;
     topTracks[range] = data.items ?? [];
   }
