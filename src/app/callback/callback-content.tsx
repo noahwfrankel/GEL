@@ -63,14 +63,14 @@ export function CallbackContent() {
       if (typeof window !== "undefined") {
         sessionStorage.removeItem(SPOTIFY_STORAGE_VERIFIER);
         sessionStorage.removeItem(SPOTIFY_STORAGE_STATE);
-        sessionStorage.setItem(
-          TOKEN_STORAGE_KEY,
-          JSON.stringify({
-            access_token: data.access_token,
-            refresh_token: data.refresh_token,
-            expires_in: data.expires_in,
-          })
-        );
+        const tokens = {
+          access_token: data.access_token,
+          refresh_token: data.refresh_token,
+          expires_in: data.expires_in,
+        };
+        const tokensJson = JSON.stringify(tokens);
+        sessionStorage.setItem(TOKEN_STORAGE_KEY, tokensJson);
+        localStorage.setItem(TOKEN_STORAGE_KEY, tokensJson);
         localStorage.setItem("gel_spotify_connected", "true");
       }
 

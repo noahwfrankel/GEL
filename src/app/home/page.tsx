@@ -6,6 +6,7 @@ import {
   setOnboardingData,
   type OnboardingData,
 } from "@/lib/onboarding-storage";
+import { fetchAndStoreSpotifyData } from "@/lib/spotify-api";
 
 const FEET_OPTIONS = [4, 5, 6, 7];
 const INCHES_OPTIONS = Array.from({ length: 12 }, (_, i) => i);
@@ -61,6 +62,24 @@ export default function HomePage() {
       const t = setTimeout(() => setPhase(0), LOADING_HOLD_MS);
       return () => clearTimeout(t);
     }
+  }, [mounted, phase]);
+
+  useEffect(() => {
+    if (!mounted || phase !== 3) return;
+    let cancelled = false;
+    fetchAndStoreSpotifyData()
+      .then((data) => {
+        if (cancelled) return;
+        if (data) {
+          console.log("Spotify data fetched and stored:", data);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("Spotify fetch error:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [mounted, phase]);
 
   const toggleFit = (fit: (typeof FIT_OPTIONS)[number]) => {
