@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   SPOTIFY_STORAGE_VERIFIER,
@@ -96,12 +97,12 @@ export function CallbackContent() {
         {status === "error" && (
           <>
             <p className="mb-4 text-red-400">{message}</p>
-            <a
+            <Link
               href="/"
-              className="rounded-full bg-white/10 px-6 py-3 text-white hover:bg-white/20"
+              className="rounded-xl bg-[#141414] border border-[rgba(255,255,255,0.12)] px-6 py-3 text-white font-semibold hover:bg-[#1c1c1c] transition duration-200"
             >
               Back to home
-            </a>
+            </Link>
           </>
         )}
       </main>

@@ -7,7 +7,7 @@ import { TOKEN_STORAGE_KEY } from "@/lib/spotify-api";
 
 const SPOTIFY_CONNECTED_KEY = "gel_spotify_connected";
 
-export default function Home() {
+export default function SplashPage() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [showSplash, setShowSplash] = useState(false);
@@ -18,8 +18,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!mounted || typeof window === "undefined") return;
-    const hasConnected =
-      localStorage.getItem(SPOTIFY_CONNECTED_KEY) === "true";
+    const hasConnected = localStorage.getItem(SPOTIFY_CONNECTED_KEY) === "true";
     const hasTokens = !!localStorage.getItem(TOKEN_STORAGE_KEY);
     if (hasConnected && hasTokens) {
       router.replace("/home");
@@ -30,35 +29,30 @@ export default function Home() {
 
   if (!mounted || !showSplash) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-[#0d0d0d] px-6">
-        <main className="flex max-w-md flex-col items-center text-center">
-          <div className="mb-12 h-24 w-24 rounded-2xl border-2 border-white/10 bg-white/5" />
-          <div className="mb-4 h-9 w-64 animate-pulse rounded bg-white/10" />
-          <div className="mb-14 h-5 w-48 animate-pulse rounded bg-white/5" />
-        </main>
+      <div className="flex min-h-screen flex-col items-center justify-center bg-[#0a0a0a] px-5">
+        <div className="h-10 w-48 animate-pulse-skeleton rounded bg-white/10" />
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-[#0d0d0d] px-6">
-      <main className="flex max-w-md flex-col items-center text-center">
-        <div
-          className="mb-12 flex h-24 w-24 items-center justify-center rounded-2xl border-2 border-white/10 bg-white/5 text-2xl font-bold tracking-tight text-white/90"
-          aria-hidden
-        >
+    <div className="flex min-h-screen flex-col items-center justify-center bg-[#0a0a0a] px-5">
+      <main className="flex max-w-md flex-col items-center text-center w-full">
+        <span className="text-[48px] font-extrabold tracking-[-2px] text-white" aria-hidden>
           GEL
-        </div>
+        </span>
+        <div className="h-px w-10 bg-[#22c55e] mt-2" aria-hidden />
+        <p className="mt-3 text-base text-[#a1a1aa]">Your music. Your aesthetic.</p>
 
-        <h1 className="mb-4 font-semibold tracking-tight text-white text-3xl sm:text-4xl">
+        <div className="flex-1 min-h-[80px]" />
+
+        <p className="text-[13px] text-[#52525b] text-center mb-6">
           Discover your style through your music
-        </h1>
-
-        <p className="mb-14 max-w-sm text-base text-zinc-400">
-          Connect your Spotify to get started.
         </p>
-
         <SpotifyLoginButton />
+        <p className="text-[12px] text-[#52525b] text-center mt-3">
+          Your data is never sold or shared.
+        </p>
       </main>
     </div>
   );

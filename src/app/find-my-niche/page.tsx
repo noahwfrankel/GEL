@@ -4,17 +4,68 @@ import { useMemo, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { SPOTIFY_DATA_STORAGE_KEY } from "@/lib/spotify-api";
+import { BottomNav } from "@/components/BottomNav";
 
 const SEEN_GENRES_KEY = "gel_niche_seen_genres";
 const SAVED_NICHES_KEY = "gel_saved_niches";
 
-type GenreCard = { genre: string; artists: { name: string }[] };
+type GenreCard = {
+  genre: string;
+  artists: { name: string }[];
+  description: string;
+  aestheticLabel: string;
+  gradient: { color1: string; color2: string };
+};
 
 type SavedNiche = {
   genre: string;
   artists: { name: string }[];
   savedAt: number;
 };
+
+function getGenreGradient(genre: string): { color1: string; color2: string } {
+  const g = genre.toLowerCase();
+  if (/hip-hop|rap|trap/.test(g)) return { color1: "#1a0a2e", color2: "#0a0a1a" };
+  if (/rock|punk|metal/.test(g)) return { color1: "#2e0a0a", color2: "#0a0a0a" };
+  if (/electronic|house|techno/.test(g)) return { color1: "#0a1a2e", color2: "#0a0a1a" };
+  if (/jazz|soul|blues/.test(g)) return { color1: "#1a1200", color2: "#0a0a0a" };
+  if (/pop|indie|alternative/.test(g)) return { color1: "#0a1a12", color2: "#0a0a0a" };
+  if (/country|folk|americana/.test(g)) return { color1: "#1a1000", color2: "#0a0a0a" };
+  return { color1: "#141414", color2: "#0a0a0a" };
+}
+
+function getAestheticLabel(genre: string): string {
+  const g = genre.toLowerCase();
+  if (/hip-hop|rap|trap/.test(g)) return "Street Culture";
+  if (/rock|punk|metal/.test(g)) return "Raw Energy";
+  if (/electronic|house|techno/.test(g)) return "Digital Minimalism";
+  if (/jazz|soul|blues/.test(g)) return "Refined Cool";
+  if (/pop/.test(g)) return "Modern Edge";
+  if (/country|folk|americana/.test(g)) return "Worn-In Americana";
+  if (/indie/.test(g)) return "Thoughtful Thrift";
+  return genre.split(/[\s-]+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+const AESTHETIC_DESCRIPTIONS: Record<string, string> = {
+  "Street Culture": "Bold silhouettes, statement pieces, cultural currency",
+  "Raw Energy": "Worn-in layers, vintage cuts, unapologetic attitude",
+  "Digital Minimalism": "Clean lines, technical fabrics, future-forward",
+  "Refined Cool": "Sharp tailoring, earth tones, effortless sophistication",
+  "Modern Edge": "Trend-aware, expressive, always current",
+  "Worn-In Americana": "Durable fabrics, workwear roots, lived-in warmth",
+  "Thoughtful Thrift": "Curated vintage, unexpected combinations, individual",
+};
+
+function getAestheticDescription(aestheticLabel: string): string {
+  return AESTHETIC_DESCRIPTIONS[aestheticLabel] ?? "Curated from your listening history";
+}
+
+function formatGenreLabel(genre: string): string {
+  return genre
+    .split(/[\s-]+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
 
 function getGenreCardsFromStorage(): GenreCard[] {
   if (typeof window === "undefined") return [];
@@ -66,24 +117,29 @@ function getGenreCardsFromStorage(): GenreCard[] {
     }
 
     const genreCards: GenreCard[] = Object.entries(genreToArtists)
-      .map(([genre, names]) => ({
+      .map(([genre, names], idx) => ({
         genre,
-        artists: Array.from(names)
-          .slice(0, 3)
-          .map((name) => ({ name })),
+        artists: Array.from(names).slice(0, 3).map((name) => ({ name })),
+        description: getAestheticDescription(getAestheticLabel(genre)),
+        aestheticLabel: getAestheticLabel(genre),
+        gradient: getGenreGradient(genre),
       }))
       .filter((c) => c.artists.length > 0)
       .sort((a, b) => a.genre.localeCompare(b.genre));
 
     const clusterSize = 3;
     const artistClusterCards: GenreCard[] = [];
+    const clusterTitles = ["Heavy Rotation", "Your Top Picks", "From Your Library", "Your Vibe", "In Your Ears"];
     for (let i = 0; i < allArtistsOrdered.length; i += clusterSize) {
       const cluster = allArtistsOrdered.slice(i, i + clusterSize);
       if (cluster.length === 0) continue;
-      const title = cluster[0]?.name ?? "Unknown";
+      const clusterTitle = clusterTitles[artistClusterCards.length % clusterTitles.length]!;
       artistClusterCards.push({
-        genre: title,
+        genre: clusterTitle,
         artists: cluster.map((a) => ({ name: a?.name ?? "Unknown" })),
+        description: "Artists from your recent listening",
+        aestheticLabel: clusterTitle,
+        gradient: { color1: "#141414", color2: "#0a0a0a" },
       });
     }
 
@@ -115,7 +171,11 @@ function getSeenGenres(): string[] {
 
 function setSeenGenres(genres: string[]): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(SEEN_GENRES_KEY, JSON.stringify(genres));
+  try {
+    localStorage.setItem(SEEN_GENRES_KEY, JSON.stringify(genres));
+  } catch {
+    // ignore
+  }
 }
 
 function getSavedNiches(): SavedNiche[] {
@@ -131,14 +191,11 @@ function getSavedNiches(): SavedNiche[] {
 
 function setSavedNiches(niches: SavedNiche[]): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(SAVED_NICHES_KEY, JSON.stringify(niches));
-}
-
-function formatGenreLabel(genre: string): string {
-  return genre
-    .split(/[\s-]+/)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+  try {
+    localStorage.setItem(SAVED_NICHES_KEY, JSON.stringify(niches));
+  } catch {
+    // ignore
+  }
 }
 
 export default function FindMyNichePage() {
@@ -214,9 +271,9 @@ export default function FindMyNichePage() {
         setLeavingIndex(null);
         setIncomingIndex(null);
         setSlideDirection(null);
-      }, 320);
+      }, 280);
       return () => clearTimeout(timer2);
-    }, 320);
+    }, 280);
     return () => clearTimeout(timer);
   }, [deck, currentIndex, leavingIndex]);
 
@@ -246,20 +303,20 @@ export default function FindMyNichePage() {
 
   if (!mounted) {
     return (
-      <div className="min-h-screen bg-[#0d0d0d] flex items-center justify-center">
-        <div className="h-10 w-48 animate-pulse rounded bg-white/10" />
+      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+        <div className="h-10 w-48 animate-pulse-skeleton rounded bg-white/10" />
       </div>
     );
   }
 
   if (fullDeck.length === 0) {
     return (
-      <div className="min-h-screen bg-[#0d0d0d] px-6 pb-12 pt-6">
+      <div className="min-h-screen bg-[#0a0a0a] px-5 pb-12 pt-6">
         <div className="mx-auto max-w-md">
           <header className="mb-8">
             <Link
               href="/home"
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[#1c1c1c] border border-[rgba(255,255,255,0.08)] text-white"
               aria-label="Back to home"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -267,8 +324,8 @@ export default function FindMyNichePage() {
               </svg>
             </Link>
           </header>
-          <h1 className="text-2xl font-semibold text-white">Find My Niche</h1>
-          <p className="mt-4 text-zinc-500">Connect Spotify and listen to some music to see your genre cards here.</p>
+          <h1 className="text-[28px] font-bold tracking-[-0.5px] text-white">Find My Niche</h1>
+          <p className="mt-4 text-[15px] text-[#a1a1aa]">Connect Spotify and listen to some music to see your genre cards here.</p>
         </div>
       </div>
     );
@@ -278,29 +335,25 @@ export default function FindMyNichePage() {
   const showIncoming = incomingIndex !== null && deck[incomingIndex];
 
   return (
-    <div className="min-h-screen bg-[#0d0d0d] px-6 pb-12 pt-6 flex flex-col">
+    <div className="min-h-screen bg-[#0a0a0a] px-5 pt-6 pb-[180px] flex flex-col">
       <div className="mx-auto max-w-md w-full flex-1 flex flex-col">
-        <header className="flex items-center gap-4 mb-6">
+        <header className="flex items-center justify-between mb-6">
           <Link
             href="/home"
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white transition hover:bg-white/10"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1c1c1c] border border-[rgba(255,255,255,0.08)] text-white transition hover:border-[rgba(255,255,255,0.22)] duration-200"
             aria-label="Back to home"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </Link>
+          <h1 className="text-[18px] font-bold tracking-tight text-white">Find My Niche</h1>
+          <div className="w-10" aria-hidden />
         </header>
 
-        <h1 className="text-2xl font-semibold tracking-tight text-white">Find My Niche</h1>
-        <p className="mt-1 text-sm text-zinc-500">Swipe through your genres — save the vibes you love</p>
-
-        <div className="relative mt-8 flex-1 min-h-[280px] overflow-hidden">
+        <div className="relative flex-1 min-h-[58vh] overflow-hidden">
           {showLeaving && (
-            <div
-              key={`leaving-${leavingIndex}`}
-              className="absolute inset-0 animate-slide-out-left"
-            >
+            <div key={`leaving-${leavingIndex}`} className="absolute inset-0 animate-slide-out-left">
               <GenreCardContent
                 card={deck[leavingIndex]!}
                 isSaved={savedNiches.some((s) => s.genre === deck[leavingIndex]!.genre)}
@@ -324,53 +377,52 @@ export default function FindMyNichePage() {
           )}
         </div>
 
-        <div className="mt-6 flex justify-center">
+        <p className="text-[13px] text-[#52525b] text-center my-3">
+          {currentIndex + 1} of {deck.length}
+        </p>
+        <div className="flex justify-center">
           <button
             type="button"
             onClick={goToNext}
-            className="flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white transition hover:bg-white/10"
-            aria-label="Next genre"
+            className="flex h-[52px] w-[52px] items-center justify-center rounded-full bg-[#1c1c1c] border border-[rgba(255,255,255,0.12)] text-white transition hover:border-[rgba(255,255,255,0.22)] duration-200"
+            aria-label="Shuffle / Next genre"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
           </button>
         </div>
+      </div>
 
-        <div className="mt-8">
-          <button
-            type="button"
-            onClick={handleExplore}
-            className="w-full rounded-xl py-4 font-semibold text-black bg-[#1DB954] hover:bg-[#1ed760] transition"
-          >
-            Explore This Vibe
-          </button>
-        </div>
-
+      <div className="fixed bottom-[60px] left-0 right-0 z-40 bg-[#0a0a0a] pt-4 pb-4 px-5 border-t border-[rgba(255,255,255,0.08)]">
+        <button
+          type="button"
+          onClick={handleExplore}
+          className="w-full h-[52px] rounded-xl bg-[#22c55e] font-semibold text-black transition hover:bg-[#22c55e]/90 duration-200"
+        >
+          Explore This Vibe
+        </button>
         {savedNiches.length > 0 && (
-          <section className="mt-8">
-            <h2 className="text-sm font-medium uppercase tracking-wider text-zinc-500 mb-3">
-              Your Saved Vibes
+          <section className="mt-4">
+            <h2 className="text-[11px] font-semibold tracking-[1.5px] uppercase text-[#52525b] mb-3">
+              SAVED VIBES
             </h2>
-            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-6 px-6">
+            <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-5 px-5">
               {savedNiches.map((saved) => (
                 <Link
                   key={`${saved.genre}-${saved.savedAt}`}
                   href={`/find-my-niche/results?genre=${encodeURIComponent(saved.genre)}`}
-                  className="flex-shrink-0 rounded-xl border border-white/10 bg-white/5 px-4 py-3 min-w-[140px] transition hover:border-white/20 hover:bg-white/[0.07]"
+                  className="flex-shrink-0 rounded-full border border-[rgba(255,255,255,0.08)] bg-[#141414] px-4 py-2 text-[13px] text-white transition hover:border-[rgba(255,255,255,0.12)] hover:bg-[#1c1c1c] duration-200"
                 >
-                  <p className="text-sm font-medium text-white truncate">
-                    {formatGenreLabel(saved.genre)}
-                  </p>
-                  <p className="mt-0.5 text-xs text-zinc-500 truncate">
-                    {saved.artists.map((a) => a.name).join(", ")}
-                  </p>
+                  {formatGenreLabel(saved.genre)}
                 </Link>
               ))}
             </div>
           </section>
         )}
       </div>
+
+      <BottomNav />
     </div>
   );
 }
@@ -386,36 +438,51 @@ function GenreCardContent({
   onToggleSave: () => void;
   showHeart: boolean;
 }) {
+  const { color1, color2 } = card.gradient;
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 h-full flex flex-col">
-      <div className="flex items-start justify-between gap-2">
-        <h3 className="text-2xl font-bold tracking-tight text-white leading-tight">
-          {formatGenreLabel(card.genre)}
-        </h3>
-        {showHeart && (
-          <button
-            type="button"
-            onClick={(e) => { e.preventDefault(); onToggleSave(); }}
-            className="flex-shrink-0 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white transition hover:bg-white/10"
-            aria-label={isSaved ? "Unsave this vibe" : "Save this vibe"}
-          >
-            {isSaved ? (
-              <svg className="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
-              </svg>
-            ) : (
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-              </svg>
-            )}
-          </button>
-        )}
-      </div>
-      {card.artists.length > 0 && (
-        <p className="mt-4 text-sm text-zinc-400">
-          {card.artists.map((a) => a.name).join(" · ")}
+    <div
+      className="relative w-full h-[58vh] rounded-[20px] overflow-hidden flex flex-col border border-[rgba(255,255,255,0.08)]"
+      style={{ background: `linear-gradient(135deg, ${color1} 0%, ${color2} 100%)` }}
+    >
+      <div className="relative z-10 flex flex-col flex-1 p-6">
+        <div className="flex items-start justify-between gap-3">
+          <span className="inline-block rounded-[20px] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.1)] px-3 py-1 text-[12px] text-white">
+            {formatGenreLabel(card.genre)}
+          </span>
+          {showHeart && (
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); onToggleSave(); }}
+              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[rgba(0,0,0,0.4)] border border-[rgba(255,255,255,0.08)] text-white transition hover:bg-[rgba(0,0,0,0.5)] duration-200"
+              aria-label={isSaved ? "Unsave this vibe" : "Save this vibe"}
+            >
+              {isSaved ? (
+                <svg className="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                </svg>
+              ) : (
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                </svg>
+              )}
+            </button>
+          )}
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center text-center">
+          <h3 className="text-[32px] font-extrabold tracking-[-1px] text-white leading-[1.1]">
+            {card.aestheticLabel}
+          </h3>
+          {card.artists.length > 0 && (
+            <p className="mt-2 text-[15px] text-[#a1a1aa]">
+              {card.artists.slice(0, 3).map((a) => a.name).join(" · ")}
+            </p>
+          )}
+        </div>
+        <p className="text-[13px] text-[#52525b] italic mt-auto pt-4">
+          {card.description}
         </p>
-      )}
+      </div>
     </div>
   );
 }
+
