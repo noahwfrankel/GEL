@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 import {
   isOnboardingComplete,
   setOnboardingData,
@@ -442,9 +443,9 @@ export default function HomePage() {
             </section>
 
             <section className="mt-10 flex flex-col gap-3">
-              <button
-                type="button"
-                className="w-full rounded-xl border border-white/15 bg-white/[0.03] py-4 px-5 text-left transition hover:border-white/25 hover:bg-white/[0.06]"
+              <Link
+                href="/find-my-niche"
+                className="w-full rounded-xl border border-white/15 bg-white/[0.03] py-4 px-5 text-left transition hover:border-white/25 hover:bg-white/[0.06] block"
               >
                 <span className="block text-base font-medium text-white">
                   Find My Niche
@@ -452,7 +453,7 @@ export default function HomePage() {
                 <span className="mt-0.5 block text-sm text-zinc-500">
                   Explore a genre
                 </span>
-              </button>
+              </Link>
               <button
                 type="button"
                 className="w-full rounded-xl border border-white/15 bg-white/[0.03] py-4 px-5 text-left transition hover:border-white/25 hover:bg-white/[0.06]"
