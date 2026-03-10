@@ -23,17 +23,24 @@ function getGenreCardsFromStorage(): GenreCard[] {
     if (!raw) return [];
     const data = JSON.parse(raw) as {
       topArtists?: {
-        short_term?: { id?: string; name?: string; genres?: string[] }[];
-        medium_term?: { id?: string; name?: string; genres?: string[] }[];
-        long_term?: { id?: string; name?: string; genres?: string[] }[];
+        short_term?: { id?: string; name?: string; genres?: string[] }[] | { items?: { id?: string; name?: string; genres?: string[] }[] };
+        medium_term?: { id?: string; name?: string; genres?: string[] }[] | { items?: { id?: string; name?: string; genres?: string[] }[] };
+        long_term?: { id?: string; name?: string; genres?: string[] }[] | { items?: { id?: string; name?: string; genres?: string[] }[] };
       };
     };
+    type ArtistLike = { id?: string; name?: string; genres?: string[] };
+    function toArtistArray(value: unknown): ArtistLike[] {
+      if (Array.isArray(value)) return value as ArtistLike[];
+      if (value && typeof value === "object" && "items" in value && Array.isArray((value as { items?: unknown[] }).items))
+        return (value as { items: ArtistLike[] }).items;
+      return [];
+    }
     const genreToArtists: Record<string, Set<string>> = {};
     const ranges = [
-      data.topArtists?.short_term,
-      data.topArtists?.medium_term,
-      data.topArtists?.long_term,
-    ].filter(Boolean) as { id?: string; name?: string; genres?: string[] }[][];
+      toArtistArray(data.topArtists?.short_term),
+      toArtistArray(data.topArtists?.medium_term),
+      toArtistArray(data.topArtists?.long_term),
+    ].filter((arr) => arr.length > 0);
 
     for (const range of ranges) {
       for (const a of range) {
