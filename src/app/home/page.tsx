@@ -6,7 +6,7 @@ import {
   setOnboardingData,
   type OnboardingData,
 } from "@/lib/onboarding-storage";
-import { fetchAndStoreSpotifyData } from "@/lib/spotify-api";
+import { fetchAndStoreSpotifyData, getStoredTokens } from "@/lib/spotify-api";
 
 const FEET_OPTIONS = [4, 5, 6, 7];
 const INCHES_OPTIONS = Array.from({ length: 12 }, (_, i) => i);
@@ -66,6 +66,8 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!mounted || phase !== 3) return;
+    console.log("Attempting Spotify fetch...");
+    console.log("Tokens found:", getStoredTokens());
     let cancelled = false;
     fetchAndStoreSpotifyData()
       .then((data) => {
