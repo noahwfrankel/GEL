@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   SPOTIFY_STORAGE_VERIFIER,
   SPOTIFY_STORAGE_STATE,
@@ -9,6 +9,7 @@ import {
 import { TOKEN_STORAGE_KEY } from "@/lib/spotify-api";
 
 export function CallbackContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [message, setMessage] = useState<string>("");
@@ -73,15 +74,15 @@ export function CallbackContent() {
         localStorage.setItem("gel_spotify_connected", "true");
         setStatus("success");
         await new Promise((r) => setTimeout(r, 500));
-        window.location.href = "/home";
+        router.push("/home");
       } else {
         setStatus("success");
-        window.location.href = "/home";
+        router.push("/home");
       }
     }
 
     exchange();
-  }, [searchParams]);
+  }, [searchParams, router]);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[#0d0d0d] px-6">
