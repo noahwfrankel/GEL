@@ -1,8 +1,8 @@
 /**
  * Spotify token storage and refresh. Tokens may be in localStorage or sessionStorage.
+ * This key is the single source of truth — do not clear it when clearing onboarding data.
  */
-
-const TOKEN_STORAGE_KEY = "spotify_tokens";
+export const TOKEN_STORAGE_KEY = "spotify_tokens";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
 
 export type StoredTokens = {

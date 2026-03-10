@@ -6,8 +6,7 @@ import {
   SPOTIFY_STORAGE_VERIFIER,
   SPOTIFY_STORAGE_STATE,
 } from "@/components/spotify-login-button";
-
-const TOKEN_STORAGE_KEY = "spotify_tokens";
+import { TOKEN_STORAGE_KEY } from "@/lib/spotify-api";
 
 export function CallbackContent() {
   const searchParams = useSearchParams();
@@ -69,6 +68,7 @@ export function CallbackContent() {
           expires_in: data.expires_in,
         };
         const tokensJson = JSON.stringify(tokens);
+        console.log("Storing tokens under key:", TOKEN_STORAGE_KEY);
         sessionStorage.setItem(TOKEN_STORAGE_KEY, tokensJson);
         localStorage.setItem(TOKEN_STORAGE_KEY, tokensJson);
         localStorage.setItem("gel_spotify_connected", "true");
