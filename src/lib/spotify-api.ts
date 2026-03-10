@@ -101,6 +101,15 @@ export async function spotifyFetch<T>(
 const SPOTIFY_API_BASE = "https://api.spotify.com/v1";
 const TIME_RANGES = ["short_term", "medium_term", "long_term"] as const;
 
+export type StoredPlaylistItem = {
+  id: string;
+  name: string;
+  description: string | null;
+  images: { url: string; height: number | null; width: number | null }[];
+  tracks: { total: number };
+  owner: { display_name: string };
+};
+
 export type SpotifyData = {
   topArtists: {
     short_term: unknown[];
@@ -113,6 +122,7 @@ export type SpotifyData = {
     long_term: unknown[];
   };
   recentlyPlayed: unknown[];
+  playlists: StoredPlaylistItem[];
 };
 
 export const SPOTIFY_DATA_STORAGE_KEY = "gel_spotify_data";
@@ -132,6 +142,7 @@ export async function fetchAndStoreSpotifyData(): Promise<SpotifyData | null> {
     long_term: [] as unknown[],
   };
   let recentlyPlayed: unknown[] = [];
+  let playlists: StoredPlaylistItem[] = [];
 
   for (const range of TIME_RANGES) {
     const url = `${SPOTIFY_API_BASE}/me/top/artists?time_range=${range}&limit=50`;
@@ -150,16 +161,37 @@ export async function fetchAndStoreSpotifyData(): Promise<SpotifyData | null> {
   }
 
   const recentUrl = `${SPOTIFY_API_BASE}/me/player/recently-played?limit=50`;
-  const { data: recentData } = await spotifyFetch<{ items: unknown[] }>(
-    recentUrl,
-    token
-  );
+  const { data: recentData, newToken: recentToken } = await spotifyFetch<{
+    items: unknown[];
+  }>(recentUrl, token);
+  if (recentToken) token = recentToken;
   recentlyPlayed = recentData.items ?? [];
+
+  const playlistsUrl = `${SPOTIFY_API_BASE}/me/playlists?limit=50`;
+  const { data: playlistsData } = await spotifyFetch<{
+    items: {
+      id: string;
+      name: string;
+      description: string | null;
+      images: { url: string; height: number | null; width: number | null }[];
+      tracks: { total: number };
+      owner: { display_name: string };
+    }[];
+  }>(playlistsUrl, token);
+  playlists = (playlistsData.items ?? []).map((p) => ({
+    id: p.id,
+    name: p.name,
+    description: p.description ?? null,
+    images: p.images ?? [],
+    tracks: { total: p.tracks?.total ?? 0 },
+    owner: { display_name: p.owner?.display_name ?? "" },
+  }));
 
   const result: SpotifyData = {
     topArtists,
     topTracks,
     recentlyPlayed,
+    playlists,
   };
 
   if (typeof window !== "undefined") {
