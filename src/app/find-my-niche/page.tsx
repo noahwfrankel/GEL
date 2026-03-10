@@ -1,70 +1,22 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { SPOTIFY_DATA_STORAGE_KEY } from "@/lib/spotify-api";
 
-type ArtistWithGenres = { id: string; name: string; genres?: string[] };
+const SEEN_GENRES_KEY = "gel_niche_seen_genres";
+const SAVED_NICHES_KEY = "gel_saved_niches";
 
-type AestheticCard = {
-  id: string;
-  label: string;
+type GenreCard = { genre: string; artists: { name: string }[] };
+
+type SavedNiche = {
+  genre: string;
   artists: { name: string }[];
-  colorClass: string;
+  savedAt: number;
 };
 
-const AESTHETIC_DEFINITIONS: {
-  id: string;
-  label: string;
-  keywords: string[];
-  colorClass: string;
-}[] = [
-  {
-    id: "skate",
-    label: "Late 90s Skate",
-    keywords: ["skate", "punk", "pop punk", "pop-punk", "alternative", "emo", "post-punk", "grunge"],
-    colorClass: "from-amber-950/40 to-transparent",
-  },
-  {
-    id: "minimal",
-    label: "Dark Minimalist",
-    keywords: ["minimal", "indie", "art pop", "ambient", "experimental", "dream pop", "shoegaze", "post-rock", "lo-fi"],
-    colorClass: "from-slate-800/50 to-transparent",
-  },
-  {
-    id: "harlem",
-    label: "Harlem Soul",
-    keywords: ["hip-hop", "hip hop", "r&b", "soul", "rap", "funk", "neo soul", "reggae", "dancehall"],
-    colorClass: "from-rose-950/40 to-transparent",
-  },
-  {
-    id: "pop",
-    label: "Pop Maximalist",
-    keywords: ["pop", "dance", "electropop", "dance pop", "synth pop", "europop", "indie pop"],
-    colorClass: "from-violet-950/40 to-transparent",
-  },
-  {
-    id: "jazz",
-    label: "Jazz & Soul",
-    keywords: ["jazz", "bebop", "soul", "funk", "blues", "fusion", "smooth jazz"],
-    colorClass: "from-emerald-950/40 to-transparent",
-  },
-  {
-    id: "americana",
-    label: "Americana",
-    keywords: ["country", "americana", "folk", "singer-songwriter", "alt-country", "bluegrass", "outlaw"],
-    colorClass: "from-amber-900/30 to-transparent",
-  },
-  {
-    id: "electronic",
-    label: "Electronic",
-    keywords: ["electronic", "techno", "house", "edm", "trance", "drum and bass", "dubstep", "ambient"],
-    colorClass: "from-cyan-950/40 to-transparent",
-  },
-];
-
-function getArtistsFromStorage(): ArtistWithGenres[] {
+function getGenreCardsFromStorage(): GenreCard[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(SPOTIFY_DATA_STORAGE_KEY);
@@ -76,8 +28,7 @@ function getArtistsFromStorage(): ArtistWithGenres[] {
         long_term?: { id?: string; name?: string; genres?: string[] }[];
       };
     };
-    const seen = new Set<string>();
-    const artists: ArtistWithGenres[] = [];
+    const genreToArtists: Record<string, Set<string>> = {};
     const ranges = [
       data.topArtists?.short_term,
       data.topArtists?.medium_term,
@@ -86,171 +37,352 @@ function getArtistsFromStorage(): ArtistWithGenres[] {
 
     for (const range of ranges) {
       for (const a of range) {
-        const id = a?.id ?? a?.name ?? "";
-        if (!id || seen.has(id)) continue;
-        seen.add(id);
-        artists.push({
-          id,
-          name: a?.name ?? "Unknown",
-          genres: (a?.genres ?? []).map((g) => g.trim().toLowerCase()),
-        });
+        const name = a?.name ?? "Unknown";
+        const genres = (a?.genres ?? []).map((g) => g.trim().toLowerCase()).filter(Boolean);
+        for (const g of genres) {
+          if (!genreToArtists[g]) genreToArtists[g] = new Set();
+          genreToArtists[g].add(name);
+        }
       }
     }
-    return artists;
+
+    return Object.entries(genreToArtists)
+      .map(([genre, names]) => ({
+        genre,
+        artists: Array.from(names)
+          .slice(0, 3)
+          .map((name) => ({ name })),
+      }))
+      .filter((c) => c.artists.length > 0)
+      .sort((a, b) => a.genre.localeCompare(b.genre));
   } catch {
     return [];
   }
 }
 
-function getAestheticCards(): AestheticCard[] {
-  const artists = getArtistsFromStorage();
-  if (artists.length === 0) {
-    return AESTHETIC_DEFINITIONS.slice(0, 4).map((def) => ({
-      id: def.id,
-      label: def.label,
-      artists: [],
-      colorClass: def.colorClass,
-    }));
+function shuffle<T>(arr: T[]): T[] {
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
   }
-
-  const cards: AestheticCard[] = [];
-
-  for (const def of AESTHETIC_DEFINITIONS) {
-    const scored = artists
-      .map((artist) => {
-        const genres = artist.genres ?? [];
-        let score = 0;
-        for (const g of genres) {
-          for (const kw of def.keywords) {
-            if (g.includes(kw) || kw.includes(g)) {
-              score += 1;
-              break;
-            }
-          }
-        }
-        return { artist, score };
-      })
-      .filter((x) => x.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
-
-    if (scored.length > 0) {
-      cards.push({
-        id: def.id,
-        label: def.label,
-        artists: scored.map((s) => ({ name: s.artist.name })),
-        colorClass: def.colorClass,
-      });
-    }
-  }
-
-  cards.sort((a, b) => b.artists.length - a.artists.length);
-  return cards.slice(0, 5);
+  return out;
 }
 
-const FALLBACK_CARDS: AestheticCard[] = [
-  { id: "indie", label: "Indie", artists: [], colorClass: "from-slate-800/50 to-transparent" },
-  { id: "pop", label: "Pop", artists: [], colorClass: "from-violet-950/40 to-transparent" },
-  { id: "soul", label: "Soul", artists: [], colorClass: "from-rose-950/40 to-transparent" },
-];
+function getSeenGenres(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(SEEN_GENRES_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as string[];
+  } catch {
+    return [];
+  }
+}
+
+function setSeenGenres(genres: string[]): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(SEEN_GENRES_KEY, JSON.stringify(genres));
+}
+
+function getSavedNiches(): SavedNiche[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(SAVED_NICHES_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as SavedNiche[];
+  } catch {
+    return [];
+  }
+}
+
+function setSavedNiches(niches: SavedNiche[]): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(SAVED_NICHES_KEY, JSON.stringify(niches));
+}
+
+function formatGenreLabel(genre: string): string {
+  return genre
+    .split(/[\s-]+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
 
 export default function FindMyNichePage() {
   const router = useRouter();
-  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [deck, setDeck] = useState<GenreCard[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [savedNiches, setSavedNichesState] = useState<SavedNiche[]>([]);
+  const [leavingIndex, setLeavingIndex] = useState<number | null>(null);
+  const [incomingIndex, setIncomingIndex] = useState<number | null>(null);
+  const [slideDirection, setSlideDirection] = useState<"out" | "in" | null>(null);
+
+  const fullDeck = useMemo(() => {
+    if (!mounted) return [];
+    return getGenreCardsFromStorage();
+  }, [mounted]);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const aestheticCards = useMemo(() => {
-    if (!mounted) return FALLBACK_CARDS;
-    const cards = getAestheticCards();
-    return cards.length > 0 ? cards : FALLBACK_CARDS;
+  useEffect(() => {
+    if (!mounted || fullDeck.length === 0) return;
+    const seen = getSeenGenres();
+    if (seen.length >= fullDeck.length) {
+      setSeenGenres([]);
+      setDeck(shuffle([...fullDeck]));
+      setCurrentIndex(0);
+      return;
+    }
+    if (deck.length === 0) {
+      const shuffled = shuffle([...fullDeck]);
+      setDeck(shuffled);
+      setCurrentIndex(0);
+      if (shuffled[0]?.genre && !seen.includes(shuffled[0].genre)) {
+        setSeenGenres([...seen, shuffled[0].genre]);
+      }
+    }
+  }, [mounted, fullDeck]);
+
+  useEffect(() => {
+    if (!mounted || deck.length === 0) return;
+    const g = deck[currentIndex]?.genre;
+    if (!g) return;
+    const seen = getSeenGenres();
+    if (seen.includes(g)) return;
+    const newSeen = [...seen, g];
+    setSeenGenres(newSeen);
+    if (newSeen.length >= deck.length) {
+      setSeenGenres([]);
+      setDeck(shuffle([...deck]));
+    }
+  }, [mounted, deck, currentIndex]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    setSavedNichesState(getSavedNiches());
   }, [mounted]);
 
-  const handleExplore = () => {
-    if (!selectedCardId) return;
-    router.push("/find-my-niche/results");
-  };
+  const currentCard = deck[currentIndex] ?? null;
+  const currentGenre = currentCard?.genre ?? "";
+
+  const goToNext = useCallback(() => {
+    if (deck.length === 0 || leavingIndex !== null) return;
+    const next = (currentIndex + 1) % deck.length;
+    setLeavingIndex(currentIndex);
+    setIncomingIndex(next);
+    setSlideDirection("out");
+    const timer = setTimeout(() => {
+      setSlideDirection("in");
+      setCurrentIndex(next);
+      const timer2 = setTimeout(() => {
+        setLeavingIndex(null);
+        setIncomingIndex(null);
+        setSlideDirection(null);
+      }, 320);
+      return () => clearTimeout(timer2);
+    }, 320);
+    return () => clearTimeout(timer);
+  }, [deck, currentIndex, leavingIndex]);
+
+  const isSaved = useMemo(() => {
+    return savedNiches.some((s) => s.genre === currentGenre);
+  }, [savedNiches, currentGenre]);
+
+  const toggleSave = useCallback(() => {
+    if (!currentCard) return;
+    let next = getSavedNiches();
+    if (isSaved) {
+      next = next.filter((s) => s.genre !== currentGenre);
+    } else {
+      next = [
+        ...next,
+        { genre: currentGenre, artists: currentCard.artists, savedAt: Date.now() },
+      ];
+    }
+    setSavedNiches(next);
+    setSavedNichesState(next);
+  }, [currentCard, currentGenre, isSaved]);
+
+  const handleExplore = useCallback(() => {
+    if (!currentGenre) return;
+    router.push(`/find-my-niche/results?genre=${encodeURIComponent(currentGenre)}`);
+  }, [currentGenre, router]);
+
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-[#0d0d0d] flex items-center justify-center">
+        <div className="h-10 w-48 animate-pulse rounded bg-white/10" />
+      </div>
+    );
+  }
+
+  if (fullDeck.length === 0) {
+    return (
+      <div className="min-h-screen bg-[#0d0d0d] px-6 pb-12 pt-6">
+        <div className="mx-auto max-w-md">
+          <header className="mb-8">
+            <Link
+              href="/home"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white"
+              aria-label="Back to home"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </Link>
+          </header>
+          <h1 className="text-2xl font-semibold text-white">Find My Niche</h1>
+          <p className="mt-4 text-zinc-500">Connect Spotify and listen to some music to see your genre cards here.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const showLeaving = leavingIndex !== null && deck[leavingIndex];
+  const showIncoming = incomingIndex !== null && deck[incomingIndex];
 
   return (
-    <div className="min-h-screen bg-[#0d0d0d] px-6 pb-12 pt-6">
-      <div className="mx-auto max-w-md">
-        <header className="flex items-center gap-4 mb-8">
+    <div className="min-h-screen bg-[#0d0d0d] px-6 pb-12 pt-6 flex flex-col">
+      <div className="mx-auto max-w-md w-full flex-1 flex flex-col">
+        <header className="flex items-center gap-4 mb-6">
           <Link
             href="/home"
             className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white transition hover:bg-white/10"
             aria-label="Back to home"
           >
-            <svg
-              className="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              aria-hidden
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
-              />
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </Link>
         </header>
 
-        <h1 className="text-2xl font-semibold tracking-tight text-white">
-          Find My Niche
-        </h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          Your taste, reflected — tap the vibe that feels most you
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight text-white">Find My Niche</h1>
+        <p className="mt-1 text-sm text-zinc-500">Swipe through your genres — save the vibes you love</p>
 
-        <div className="mt-8 flex flex-col gap-4">
-          {aestheticCards.map((card) => {
-            const isSelected = selectedCardId === card.id;
-            return (
-              <button
-                key={card.id}
-                type="button"
-                onClick={() => setSelectedCardId(isSelected ? null : card.id)}
-                className={`relative overflow-hidden rounded-2xl border text-left transition ${
-                  isSelected
-                    ? "border-[#1DB954] ring-2 ring-[#1DB954]/30"
-                    : "border-white/10 hover:border-white/20"
-                }`}
-              >
-                <div
-                  className={`absolute inset-0 bg-gradient-to-br ${card.colorClass}`}
-                  aria-hidden
-                />
-                <div className="relative p-5">
-                  <h3 className="text-lg font-semibold tracking-tight text-white">
-                    {card.label}
-                  </h3>
-                  {card.artists.length > 0 && (
-                    <p className="mt-2 text-sm text-zinc-400">
-                      {card.artists.map((a) => a.name).join(" · ")}
-                    </p>
-                  )}
-                </div>
-              </button>
-            );
-          })}
+        <div className="relative mt-8 flex-1 min-h-[280px] overflow-hidden">
+          {showLeaving && (
+            <div
+              key={`leaving-${leavingIndex}`}
+              className="absolute inset-0 animate-slide-out-left"
+            >
+              <GenreCardContent
+                card={deck[leavingIndex]!}
+                isSaved={savedNiches.some((s) => s.genre === deck[leavingIndex]!.genre)}
+                onToggleSave={() => {}}
+                showHeart={false}
+              />
+            </div>
+          )}
+          {(showIncoming || currentCard) && (
+            <div
+              key={showIncoming ? `in-${incomingIndex}` : `cur-${currentIndex}`}
+              className={`absolute inset-0 ${slideDirection === "in" ? "animate-slide-in-right" : ""}`}
+            >
+              <GenreCardContent
+                card={showIncoming ? deck[incomingIndex!]! : currentCard!}
+                isSaved={isSaved}
+                onToggleSave={toggleSave}
+                showHeart={true}
+              />
+            </div>
+          )}
         </div>
 
-        <div className="mt-10">
+        <div className="mt-6 flex justify-center">
+          <button
+            type="button"
+            onClick={goToNext}
+            className="flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white transition hover:bg-white/10"
+            aria-label="Next genre"
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="mt-8">
           <button
             type="button"
             onClick={handleExplore}
-            disabled={!selectedCardId}
-            className="w-full rounded-xl py-4 font-semibold text-black transition disabled:opacity-50 disabled:cursor-not-allowed bg-[#1DB954] hover:bg-[#1ed760] disabled:hover:bg-[#1DB954]"
+            className="w-full rounded-xl py-4 font-semibold text-black bg-[#1DB954] hover:bg-[#1ed760] transition"
           >
             Explore This Vibe
           </button>
         </div>
+
+        {savedNiches.length > 0 && (
+          <section className="mt-8">
+            <h2 className="text-sm font-medium uppercase tracking-wider text-zinc-500 mb-3">
+              Your Saved Vibes
+            </h2>
+            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-6 px-6">
+              {savedNiches.map((saved) => (
+                <Link
+                  key={`${saved.genre}-${saved.savedAt}`}
+                  href={`/find-my-niche/results?genre=${encodeURIComponent(saved.genre)}`}
+                  className="flex-shrink-0 rounded-xl border border-white/10 bg-white/5 px-4 py-3 min-w-[140px] transition hover:border-white/20 hover:bg-white/[0.07]"
+                >
+                  <p className="text-sm font-medium text-white truncate">
+                    {formatGenreLabel(saved.genre)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-zinc-500 truncate">
+                    {saved.artists.map((a) => a.name).join(", ")}
+                  </p>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
+    </div>
+  );
+}
+
+function GenreCardContent({
+  card,
+  isSaved,
+  onToggleSave,
+  showHeart,
+}: {
+  card: GenreCard;
+  isSaved: boolean;
+  onToggleSave: () => void;
+  showHeart: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 h-full flex flex-col">
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="text-2xl font-bold tracking-tight text-white leading-tight">
+          {formatGenreLabel(card.genre)}
+        </h3>
+        {showHeart && (
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); onToggleSave(); }}
+            className="flex-shrink-0 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white transition hover:bg-white/10"
+            aria-label={isSaved ? "Unsave this vibe" : "Save this vibe"}
+          >
+            {isSaved ? (
+              <svg className="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+              </svg>
+            ) : (
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+              </svg>
+            )}
+          </button>
+        )}
+      </div>
+      {card.artists.length > 0 && (
+        <p className="mt-4 text-sm text-zinc-400">
+          {card.artists.map((a) => a.name).join(" · ")}
+        </p>
+      )}
     </div>
   );
 }
