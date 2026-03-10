@@ -110,11 +110,25 @@ export type StoredPlaylistItem = {
   owner: { display_name: string };
 };
 
+/** Full artist object as returned by Spotify (e.g. /me/top/artists). Keep genres & popularity for Find My Niche. */
+export type StoredArtist = {
+  id: string;
+  name: string;
+  type: string;
+  uri: string;
+  href: string;
+  external_urls: Record<string, string>;
+  images: { url: string; height: number | null; width: number | null }[];
+  genres?: string[];
+  popularity?: number;
+  followers?: { href: string | null; total: number };
+};
+
 export type SpotifyData = {
   topArtists: {
-    short_term: unknown[];
-    medium_term: unknown[];
-    long_term: unknown[];
+    short_term: StoredArtist[];
+    medium_term: StoredArtist[];
+    long_term: StoredArtist[];
   };
   topTracks: {
     short_term: unknown[];
@@ -133,9 +147,9 @@ export async function fetchAndStoreSpotifyData(): Promise<SpotifyData | null> {
   if (!token) return null;
 
   const topArtists = {
-    short_term: [] as unknown[],
-    medium_term: [] as unknown[],
-    long_term: [] as unknown[],
+    short_term: [] as StoredArtist[],
+    medium_term: [] as StoredArtist[],
+    long_term: [] as StoredArtist[],
   };
   const topTracks = {
     short_term: [] as unknown[],
@@ -147,10 +161,14 @@ export async function fetchAndStoreSpotifyData(): Promise<SpotifyData | null> {
 
   for (const range of TIME_RANGES) {
     const url = `${SPOTIFY_API_BASE}/me/top/artists?time_range=${range}&limit=50`;
-    const { data, newToken }: { data: { items: unknown[] }; newToken: string | null } =
-      await spotifyFetch<{ items: unknown[] }>(url, token);
+    const { data, newToken } = await spotifyFetch<{ items: StoredArtist[] }>(url, token);
     if (newToken) token = newToken;
-    topArtists[range] = data.items ?? [];
+    const items = data.items ?? [];
+    topArtists[range] = items.map((a) => ({
+      ...a,
+      genres: a.genres ?? [],
+      popularity: a.popularity ?? 0,
+    }));
   }
 
   for (const range of TIME_RANGES) {

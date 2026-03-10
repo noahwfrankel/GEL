@@ -42,6 +42,18 @@ function getGenreCardsFromStorage(): GenreCard[] {
       toArtistArray(data.topArtists?.long_term),
     ].filter((arr) => arr.length > 0);
 
+    const seenIds = new Set<string>();
+    const allArtistsOrdered: ArtistLike[] = [];
+    for (const range of ranges) {
+      for (const a of range) {
+        const id = a?.id ?? a?.name ?? "";
+        if (id && !seenIds.has(id)) {
+          seenIds.add(id);
+          allArtistsOrdered.push(a);
+        }
+      }
+    }
+
     for (const range of ranges) {
       for (const a of range) {
         const name = a?.name ?? "Unknown";
@@ -53,7 +65,7 @@ function getGenreCardsFromStorage(): GenreCard[] {
       }
     }
 
-    return Object.entries(genreToArtists)
+    const genreCards: GenreCard[] = Object.entries(genreToArtists)
       .map(([genre, names]) => ({
         genre,
         artists: Array.from(names)
@@ -62,6 +74,20 @@ function getGenreCardsFromStorage(): GenreCard[] {
       }))
       .filter((c) => c.artists.length > 0)
       .sort((a, b) => a.genre.localeCompare(b.genre));
+
+    const clusterSize = 3;
+    const artistClusterCards: GenreCard[] = [];
+    for (let i = 0; i < allArtistsOrdered.length; i += clusterSize) {
+      const cluster = allArtistsOrdered.slice(i, i + clusterSize);
+      if (cluster.length === 0) continue;
+      const title = cluster[0]?.name ?? "Unknown";
+      artistClusterCards.push({
+        genre: title,
+        artists: cluster.map((a) => ({ name: a?.name ?? "Unknown" })),
+      });
+    }
+
+    return [...genreCards, ...artistClusterCards];
   } catch {
     return [];
   }
