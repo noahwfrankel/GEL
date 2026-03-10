@@ -161,7 +161,8 @@ export async function fetchAndStoreSpotifyData(): Promise<SpotifyData | null> {
 
   for (const range of TIME_RANGES) {
     const url = `${SPOTIFY_API_BASE}/me/top/artists?time_range=${range}&limit=50`;
-    const { data, newToken } = await spotifyFetch<{ items: StoredArtist[] }>(url, token);
+    const { data, newToken }: { data: { items: StoredArtist[] }; newToken: string | null } =
+      await spotifyFetch<{ items: StoredArtist[] }>(url, token);
     if (newToken) token = newToken;
     const items = data.items ?? [];
     topArtists[range] = items.map((a) => ({
@@ -180,14 +181,13 @@ export async function fetchAndStoreSpotifyData(): Promise<SpotifyData | null> {
   }
 
   const recentUrl = `${SPOTIFY_API_BASE}/me/player/recently-played?limit=50`;
-  const { data: recentData, newToken: recentToken } = await spotifyFetch<{
-    items: unknown[];
-  }>(recentUrl, token);
+  const { data: recentData, newToken: recentToken }: { data: { items: unknown[] }; newToken: string | null } =
+    await spotifyFetch<{ items: unknown[] }>(recentUrl, token);
   if (recentToken) token = recentToken;
   recentlyPlayed = recentData.items ?? [];
 
   const playlistsUrl = `${SPOTIFY_API_BASE}/me/playlists?limit=50`;
-  const { data: playlistsData } = await spotifyFetch<{
+  type PlaylistsResponse = {
     items: {
       id: string;
       name: string;
@@ -196,7 +196,10 @@ export async function fetchAndStoreSpotifyData(): Promise<SpotifyData | null> {
       tracks: { total: number };
       owner: { display_name: string };
     }[];
-  }>(playlistsUrl, token);
+  };
+  const { data: playlistsData, newToken: playlistsToken }: { data: PlaylistsResponse; newToken: string | null } =
+    await spotifyFetch<PlaylistsResponse>(playlistsUrl, token);
+  if (playlistsToken) token = playlistsToken;
   playlists = (playlistsData.items ?? []).map((p) => ({
     id: p.id,
     name: p.name,
