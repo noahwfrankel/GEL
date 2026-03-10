@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SpotifyLoginButton } from "@/components/spotify-login-button";
+import { TOKEN_STORAGE_KEY } from "@/lib/spotify-api";
 
 const SPOTIFY_CONNECTED_KEY = "gel_spotify_connected";
 
@@ -17,7 +18,10 @@ export default function Home() {
 
   useEffect(() => {
     if (!mounted || typeof window === "undefined") return;
-    if (localStorage.getItem(SPOTIFY_CONNECTED_KEY) === "true") {
+    const hasConnected =
+      localStorage.getItem(SPOTIFY_CONNECTED_KEY) === "true";
+    const hasTokens = !!localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (hasConnected && hasTokens) {
       router.replace("/home");
       return;
     }

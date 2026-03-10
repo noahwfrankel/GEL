@@ -126,6 +126,7 @@ export type SpotifyData = {
 };
 
 export const SPOTIFY_DATA_STORAGE_KEY = "gel_spotify_data";
+export const SPOTIFY_FETCHED_AT_KEY = "gel_spotify_fetched_at";
 
 export async function fetchAndStoreSpotifyData(): Promise<SpotifyData | null> {
   let token = await getValidAccessToken();
@@ -196,6 +197,7 @@ export async function fetchAndStoreSpotifyData(): Promise<SpotifyData | null> {
 
   if (typeof window !== "undefined") {
     localStorage.setItem(SPOTIFY_DATA_STORAGE_KEY, JSON.stringify(result));
+    localStorage.setItem(SPOTIFY_FETCHED_AT_KEY, Date.now().toString());
   }
 
   return result;

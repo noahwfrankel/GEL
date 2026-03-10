@@ -7,7 +7,12 @@ import {
   setOnboardingData,
   type OnboardingData,
 } from "@/lib/onboarding-storage";
-import { fetchAndStoreSpotifyData, getStoredTokens } from "@/lib/spotify-api";
+import {
+  fetchAndStoreSpotifyData,
+  getStoredTokens,
+  SPOTIFY_DATA_STORAGE_KEY,
+  SPOTIFY_FETCHED_AT_KEY,
+} from "@/lib/spotify-api";
 
 const FEET_OPTIONS = [4, 5, 6, 7];
 const INCHES_OPTIONS = Array.from({ length: 12 }, (_, i) => i);
@@ -24,6 +29,7 @@ export default function HomePage() {
   const [mounted, setMounted] = useState(false);
   const [phase, setPhase] = useState<-3 | -2 | -1 | 0 | 1 | 2 | 3>(-3);
   const [spotifyTokensFailed, setSpotifyTokensFailed] = useState(false);
+  const [skippedToHome, setSkippedToHome] = useState(false);
   const sequenceStartedRef = useRef(false);
 
   const [heightFeet, setHeightFeet] = useState(5);
@@ -46,6 +52,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!mounted) return;
     if (isOnboardingComplete()) {
+      setSkippedToHome(true);
       setPhase(3);
       return;
     }
@@ -71,23 +78,33 @@ export default function HomePage() {
     let cancelled = false;
     setSpotifyTokensFailed(false);
 
+    const CACHE_MS = 30 * 60 * 1000;
+
+    function shouldFetchSpotifyData(): boolean {
+      if (typeof window === "undefined") return true;
+      const raw = localStorage.getItem(SPOTIFY_DATA_STORAGE_KEY);
+      const fetchedAt = localStorage.getItem(SPOTIFY_FETCHED_AT_KEY);
+      if (!raw) return true;
+      if (!fetchedAt) return true;
+      const ts = parseInt(fetchedAt, 10);
+      if (Number.isNaN(ts)) return true;
+      return Date.now() - ts > CACHE_MS;
+    }
+
     async function run() {
       let tokens = getStoredTokens();
       if (!tokens) {
-        console.log("Tokens null on first check, retrying in 1s...");
         await new Promise((r) => setTimeout(r, 1000));
         if (cancelled) return;
         tokens = getStoredTokens();
       }
-      console.log("Tokens result after check (and optional retry):", tokens ? "found" : "null");
       if (!tokens) {
         if (!cancelled) setSpotifyTokensFailed(true);
         return;
       }
+      if (!shouldFetchSpotifyData()) return;
       try {
-        const data = await fetchAndStoreSpotifyData();
-        if (cancelled) return;
-        console.log("Spotify data fetched and stored:", data ?? "null");
+        await fetchAndStoreSpotifyData();
       } catch (err) {
         if (!cancelled) console.error("Spotify fetch error:", err);
       }
@@ -361,7 +378,7 @@ export default function HomePage() {
         {showHome && !spotifyTokensFailed && (
           <div
             key="home"
-            className="animate-fade-in min-h-full pb-8"
+            className={`${skippedToHome ? "" : "animate-fade-in"} min-h-full pb-8`}
           >
             <header className="flex items-center justify-between px-0 py-4">
               <span className="text-xl font-semibold tracking-tight text-white">
