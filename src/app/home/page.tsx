@@ -22,6 +22,7 @@ const selectClassName =
 export default function HomePage() {
   const [mounted, setMounted] = useState(false);
   const [phase, setPhase] = useState<-3 | -2 | -1 | 0 | 1 | 2 | 3>(-3);
+  const [spotifyTokensFailed, setSpotifyTokensFailed] = useState(false);
   const sequenceStartedRef = useRef(false);
 
   const [heightFeet, setHeightFeet] = useState(5);
@@ -66,19 +67,31 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!mounted || phase !== 3) return;
-    console.log("Attempting Spotify fetch...");
-    console.log("Tokens found:", getStoredTokens());
     let cancelled = false;
-    fetchAndStoreSpotifyData()
-      .then((data) => {
+    setSpotifyTokensFailed(false);
+
+    async function run() {
+      let tokens = getStoredTokens();
+      if (!tokens) {
+        console.log("Tokens null on first check, retrying in 1s...");
+        await new Promise((r) => setTimeout(r, 1000));
         if (cancelled) return;
-        if (data) {
-          console.log("Spotify data fetched and stored:", data);
-        }
-      })
-      .catch((err) => {
+        tokens = getStoredTokens();
+      }
+      console.log("Tokens result after check (and optional retry):", tokens ? "found" : "null");
+      if (!tokens) {
+        if (!cancelled) setSpotifyTokensFailed(true);
+        return;
+      }
+      try {
+        const data = await fetchAndStoreSpotifyData();
+        if (cancelled) return;
+        console.log("Spotify data fetched and stored:", data ?? "null");
+      } catch (err) {
         if (!cancelled) console.error("Spotify fetch error:", err);
-      });
+      }
+    }
+    run();
     return () => {
       cancelled = true;
     };
@@ -112,6 +125,11 @@ export default function HomePage() {
     if (phase === 0) return true;
     if (phase === 1) return fitPreferences.length > 0;
     return true;
+  };
+
+  const handleLogout = () => {
+    localStorage.clear();
+    window.location.href = "/";
   };
 
   if (!mounted) {
@@ -321,7 +339,25 @@ export default function HomePage() {
           </div>
         )}
 
-        {showHome && (
+        {showHome && spotifyTokensFailed && (
+          <div
+            key="home-error"
+            className="flex flex-col items-center justify-center flex-1 text-center animate-fade-in"
+          >
+            <p className="text-red-400 mb-6 max-w-sm">
+              Could not connect to Spotify. Please log out and try again.
+            </p>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="rounded-full bg-white/10 px-6 py-3 text-white font-medium hover:bg-white/20 transition"
+            >
+              Log out
+            </button>
+          </div>
+        )}
+
+        {showHome && !spotifyTokensFailed && (
           <div
             key="home"
             className="flex flex-col items-center justify-center flex-1 text-center animate-fade-in"

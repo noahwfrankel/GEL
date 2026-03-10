@@ -9,18 +9,12 @@ export type StoredTokens = {
   access_token: string;
   refresh_token: string;
   expires_in: number;
+  token_type?: string;
 };
-
-function getStorage(): Storage | null {
-  if (typeof window === "undefined") return null;
-  return window.localStorage ?? window.sessionStorage;
-}
 
 export function getStoredTokens(): StoredTokens | null {
   if (typeof window === "undefined") return null;
-  const raw =
-    localStorage.getItem(TOKEN_STORAGE_KEY) ??
-    sessionStorage.getItem(TOKEN_STORAGE_KEY);
+  const raw = localStorage.getItem(TOKEN_STORAGE_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as StoredTokens;
@@ -31,9 +25,7 @@ export function getStoredTokens(): StoredTokens | null {
 
 export function setStoredTokens(tokens: StoredTokens): void {
   if (typeof window === "undefined") return;
-  const json = JSON.stringify(tokens);
-  localStorage.setItem(TOKEN_STORAGE_KEY, json);
-  sessionStorage.setItem(TOKEN_STORAGE_KEY, json);
+  localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(tokens));
 }
 
 export async function refreshAccessToken(): Promise<string | null> {

@@ -66,16 +66,18 @@ export function CallbackContent() {
           access_token: data.access_token,
           refresh_token: data.refresh_token,
           expires_in: data.expires_in,
+          token_type: data.token_type ?? "Bearer",
         };
         const tokensJson = JSON.stringify(tokens);
-        console.log("Storing tokens under key:", TOKEN_STORAGE_KEY);
-        sessionStorage.setItem(TOKEN_STORAGE_KEY, tokensJson);
         localStorage.setItem(TOKEN_STORAGE_KEY, tokensJson);
         localStorage.setItem("gel_spotify_connected", "true");
+        setStatus("success");
+        await new Promise((r) => setTimeout(r, 500));
+        window.location.href = "/home";
+      } else {
+        setStatus("success");
+        window.location.href = "/home";
       }
-
-      setStatus("success");
-      window.location.href = "/home";
     }
 
     exchange();

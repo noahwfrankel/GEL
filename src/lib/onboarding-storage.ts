@@ -1,6 +1,9 @@
 export const ONBOARDING_STORAGE_KEY = "gel_onboarding";
 
-/** Keys that may be cleared when resetting onboarding. Never clear spotify_tokens here. */
+/**
+ * Keys that may be cleared when resetting onboarding.
+ * NEVER include "spotify_tokens" here — the onboarding flow must not touch Spotify tokens.
+ */
 const ONBOARDING_CLEAR_KEYS = [
   ONBOARDING_STORAGE_KEY,
   "gel_spotify_connected",
@@ -8,7 +11,7 @@ const ONBOARDING_CLEAR_KEYS = [
 
 /**
  * Clears only onboarding-related data from localStorage.
- * Does NOT clear spotify_tokens — tokens must persist for API calls.
+ * Does NOT clear or modify spotify_tokens under any circumstances.
  */
 export function clearOnboardingDataOnly(): void {
   if (typeof window === "undefined") return;
