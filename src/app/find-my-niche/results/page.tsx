@@ -13,10 +13,28 @@ type AestheticResponse = {
   ebay_search_keywords: string[];
 };
 
+type FashionItem = {
+  title: string;
+  price: number;
+  image_url: string;
+  item_url: string;
+  condition: string;
+  source: string;
+};
+
+type FashionSearchResponse = {
+  items: FashionItem[];
+  total: number;
+};
+
 type ArtistLike = { name?: string; genres?: string[] };
 
 const AESTHETIC_CACHE_PREFIX = "gel_niche_aesthetic_";
 const AESTHETIC_ENDPOINT = "https://web-production-78bf0.up.railway.app/aesthetic/from-genre";
+const FASHION_CACHE_PREFIX = "gel_niche_fashion_";
+const FASHION_ENDPOINT = "https://web-production-78bf0.up.railway.app/fashion/search";
+const FASHION_FETCHED_AT_PREFIX = "gel_niche_fashion_fetched_at_";
+const STALE_MS = 24 * 60 * 60 * 1000;
 
 function genreToStorageKey(genre: string): string {
   return genre.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_-]/g, "") || "unknown";
@@ -95,12 +113,55 @@ function ProductSkeletonGrid() {
   );
 }
 
+function formatPrice(value: number): string {
+  if (!Number.isFinite(value)) return "$0.00";
+  return `$${value.toFixed(2)}`;
+}
+
+function getGenderFromFitPreferences(value: unknown): "mens" | "womens" | "unisex" {
+  const normalizedValues = (Array.isArray(value) ? value : [value])
+    .map((v) => String(v ?? "").toLowerCase());
+  if (normalizedValues.some((v) => v.includes("menswear"))) return "mens";
+  if (normalizedValues.some((v) => v.includes("womenswear"))) return "womens";
+  return "unisex";
+}
+
+function getOnboardingFilters(): { budgetMin: number; budgetMax: number; gender: "mens" | "womens" | "unisex" } {
+  if (typeof window === "undefined") {
+    return { budgetMin: 0, budgetMax: 500, gender: "unisex" };
+  }
+
+  try {
+    const raw = localStorage.getItem("gel_onboarding");
+    if (!raw) return { budgetMin: 0, budgetMax: 500, gender: "unisex" };
+    const parsed = JSON.parse(raw) as {
+      budgetMin?: unknown;
+      budgetMax?: unknown;
+      fitPreferences?: unknown;
+    };
+
+    const budgetMin = Number(parsed.budgetMin);
+    const budgetMax = Number(parsed.budgetMax);
+    const gender = getGenderFromFitPreferences(parsed.fitPreferences);
+
+    return {
+      budgetMin: Number.isFinite(budgetMin) ? budgetMin : 0,
+      budgetMax: Number.isFinite(budgetMax) ? budgetMax : 500,
+      gender,
+    };
+  } catch {
+    return { budgetMin: 0, budgetMax: 500, gender: "unisex" };
+  }
+}
+
 function ResultsContent() {
   const searchParams = useSearchParams();
   const genre = searchParams.get("genre") ?? "";
 
   const [result, setResult] = useState<AestheticResponse | null>(null);
+  const [fashionItems, setFashionItems] = useState<FashionItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isFashionLoading, setIsFashionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchAesthetic = useCallback(
@@ -112,9 +173,54 @@ function ResultsContent() {
       }
 
       const cacheKey = `${AESTHETIC_CACHE_PREFIX}${genreToStorageKey(genre)}`;
+      const fashionCacheKey = `${FASHION_CACHE_PREFIX}${genreToStorageKey(genre)}`;
+      const fashionFetchedAtKey = `${FASHION_FETCHED_AT_PREFIX}${genreToStorageKey(genre)}`;
 
       setIsLoading(true);
       setError(null);
+
+      const fetchFashion = async (keywords: string[]) => {
+        setIsFashionLoading(true);
+        try {
+          if (!forceRefresh && typeof window !== "undefined") {
+            const cached = localStorage.getItem(fashionCacheKey);
+            const fetchedAtRaw = localStorage.getItem(fashionFetchedAtKey);
+            const fetchedAt = fetchedAtRaw ? parseInt(fetchedAtRaw, 10) : NaN;
+            const isFresh = Number.isFinite(fetchedAt) && Date.now() - fetchedAt <= STALE_MS;
+            if (cached && isFresh) {
+              const parsed = JSON.parse(cached) as FashionItem[];
+              setFashionItems(parsed);
+              return;
+            }
+          }
+
+          const { budgetMin, budgetMax, gender } = getOnboardingFilters();
+          const fashionRes = await fetch(FASHION_ENDPOINT, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              keywords,
+              budget_min: budgetMin,
+              budget_max: budgetMax,
+              gender,
+              limit: 12,
+            }),
+          });
+
+          if (!fashionRes.ok) throw new Error(`Fashion request failed: ${fashionRes.status}`);
+
+          const fashionPayload = (await fashionRes.json()) as FashionSearchResponse;
+          const items = fashionPayload.items ?? [];
+          setFashionItems(items);
+
+          if (typeof window !== "undefined") {
+            localStorage.setItem(fashionCacheKey, JSON.stringify(items));
+            localStorage.setItem(fashionFetchedAtKey, Date.now().toString());
+          }
+        } finally {
+          setIsFashionLoading(false);
+        }
+      };
 
       if (!forceRefresh && typeof window !== "undefined") {
         try {
@@ -122,6 +228,7 @@ function ResultsContent() {
           if (cached) {
             const parsed = JSON.parse(cached) as AestheticResponse;
             setResult(parsed);
+            await fetchFashion(parsed.ebay_search_keywords ?? []);
             setIsLoading(false);
             return;
           }
@@ -144,6 +251,7 @@ function ResultsContent() {
 
         const payload = (await res.json()) as AestheticResponse;
         setResult(payload);
+        await fetchFashion(payload.ebay_search_keywords ?? []);
 
         if (typeof window !== "undefined") {
           localStorage.setItem(cacheKey, JSON.stringify(payload));
@@ -234,8 +342,34 @@ function ResultsContent() {
                 Sourcing: {result.ebay_search_keywords.join(", ")}
               </p>
             )}
-
-            <ProductSkeletonGrid />
+            {isFashionLoading ? (
+              <ProductSkeletonGrid />
+            ) : (
+              <div className="grid grid-cols-2 gap-3 mt-8">
+                {fashionItems.map((item) => (
+                  <a
+                    key={`${item.item_url}-${item.title}`}
+                    href={item.item_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="overflow-hidden rounded-xl border border-[rgba(255,255,255,0.08)] bg-[#141414] transition hover:border-[rgba(255,255,255,0.16)]"
+                  >
+                    <img
+                      src={item.image_url}
+                      alt={item.title}
+                      className="w-full h-[180px] object-cover"
+                    />
+                    <div className="p-3">
+                      <p className="text-[14px] text-white leading-[1.35] line-clamp-2">{item.title}</p>
+                      <p className="mt-2 text-[16px] font-semibold text-[#22c55e]">{formatPrice(item.price)}</p>
+                      <span className="mt-1 inline-block text-[11px] text-[#71717a]">
+                        {item.condition || "Pre-owned"}
+                      </span>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>
