@@ -7,6 +7,7 @@ import {
   SPOTIFY_DATA_STORAGE_KEY,
   type StoredArtist,
 } from "@/lib/spotify-api";
+import { safeGetItem } from "@/lib/storage-utils";
 
 type AestheticResponse = {
   aesthetic_label: string;
@@ -54,19 +55,17 @@ function toArtistArray(value: unknown): StoredArtist[] {
   return [];
 }
 
-function getTop3GenresWithArtists(): GenreRow[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(SPOTIFY_DATA_STORAGE_KEY);
-    if (!raw) return [];
-    const data = JSON.parse(raw) as {
-      topArtists?: {
-        short_term?: unknown;
-        medium_term?: unknown;
-        long_term?: unknown;
-      };
-    };
+type SpotifyDataShape = {
+  topArtists?: {
+    short_term?: unknown;
+    medium_term?: unknown;
+    long_term?: unknown;
+  };
+};
 
+function getTop3GenresWithArtists(data: SpotifyDataShape | null): GenreRow[] {
+  if (!data) return [];
+  try {
     const ranges = [
       toArtistArray(data.topArtists?.short_term),
       toArtistArray(data.topArtists?.medium_term),
@@ -126,7 +125,8 @@ export default function BuildMyClosetPage() {
 
   useEffect(() => {
     if (!mounted) return;
-    const top = getTop3GenresWithArtists();
+    const spotifyData = safeGetItem<SpotifyDataShape>(SPOTIFY_DATA_STORAGE_KEY);
+    const top = getTop3GenresWithArtists(spotifyData);
     setRows(top);
     setCards(top.map(() => ({ status: "idle" })));
   }, [mounted]);
