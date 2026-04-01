@@ -85,7 +85,7 @@ function getTop3GenresWithArtists(data: SpotifyDataShape | null): GenreRow[] {
       }
     }
 
-    return Object.entries(genreToArtists)
+    const genreRows = Object.entries(genreToArtists)
       .map(([genre, names]) => ({
         genre,
         artists: Array.from(names),
@@ -94,6 +94,22 @@ function getTop3GenresWithArtists(data: SpotifyDataShape | null): GenreRow[] {
       .sort((a, b) => b.count - a.count || a.genre.localeCompare(b.genre))
       .slice(0, 3)
       .map(({ genre, artists }) => ({ genre, artists }));
+
+    if (genreRows.length >= 3) return genreRows;
+
+    // Fallback: artists don't have genre data — cluster short_term artists
+    // in groups of 3, using the first artist's name as the genre label.
+    const shortTerm = toArtistArray(data.topArtists?.short_term);
+    const clusters: GenreRow[] = [];
+    for (let i = 0; i < shortTerm.length && clusters.length < 3; i += 3) {
+      const cluster = shortTerm.slice(i, i + 3);
+      if (cluster.length === 0) continue;
+      clusters.push({
+        genre: cluster[0]?.name?.trim() || "Unknown",
+        artists: cluster.map((a) => a?.name?.trim() || "Unknown"),
+      });
+    }
+    return clusters;
   } catch {
     return [];
   }
@@ -125,11 +141,8 @@ export default function BuildMyClosetPage() {
 
   useEffect(() => {
     if (!mounted) return;
-    console.log("[Build My Closet] mounted, reading spotify data...");
     const spotifyData = safeGetItem<SpotifyDataShape>(SPOTIFY_DATA_STORAGE_KEY);
-    console.log("[Build My Closet] safeGetItem result:", spotifyData === null ? "null" : Object.keys(spotifyData));
     const top = getTop3GenresWithArtists(spotifyData);
-    console.log("[Build My Closet] getTop3GenresWithArtists result:", top);
     setRows(top);
     setCards(top.map(() => ({ status: "idle" })));
   }, [mounted]);
