@@ -125,8 +125,11 @@ export default function BuildMyClosetPage() {
 
   useEffect(() => {
     if (!mounted) return;
+    console.log("[Build My Closet] mounted, reading spotify data...");
     const spotifyData = safeGetItem<SpotifyDataShape>(SPOTIFY_DATA_STORAGE_KEY);
+    console.log("[Build My Closet] safeGetItem result:", spotifyData === null ? "null" : Object.keys(spotifyData));
     const top = getTop3GenresWithArtists(spotifyData);
+    console.log("[Build My Closet] getTop3GenresWithArtists result:", top);
     setRows(top);
     setCards(top.map(() => ({ status: "idle" })));
   }, [mounted]);
