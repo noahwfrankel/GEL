@@ -265,7 +265,7 @@ export default function BuildMyClosetPage() {
                           Retry
                         </button>
                       </div>
-                    ) : (
+                    ) : state.status === "ok" ? (
                       <>
                         <h2 className="mt-4 text-[24px] font-extrabold tracking-tight text-white leading-tight">
                           {state.data.aesthetic_label}
@@ -302,7 +302,7 @@ export default function BuildMyClosetPage() {
                           ))}
                         </div>
                       </>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               );
