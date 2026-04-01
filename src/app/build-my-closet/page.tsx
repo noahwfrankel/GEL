@@ -301,6 +301,12 @@ export default function BuildMyClosetPage() {
                             </span>
                           ))}
                         </div>
+                        <Link
+                          href={`/build-my-closet/results?genre=${encodeURIComponent(row.genre)}`}
+                          className="mt-4 inline-flex h-10 items-center rounded-xl bg-[#22c55e] px-4 text-[13px] font-semibold text-black transition hover:bg-[#22c55e]/90 duration-200"
+                        >
+                          Explore This Aesthetic
+                        </Link>
                       </>
                     ) : null}
                   </div>
@@ -310,9 +316,6 @@ export default function BuildMyClosetPage() {
           </div>
         )}
 
-        <p className="mt-8 text-[12px] text-[#52525b] text-center">
-          Product picks for your closet — coming next
-        </p>
       </div>
 
       <BottomNav />

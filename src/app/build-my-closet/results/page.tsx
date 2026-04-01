@@ -1,15 +1,9 @@
 "use client";
 
-/**
- * Match My Vibe — results for a single playlist.
- * Spotify playlist tracks → top 5 unique artist names → aesthetic API → fashion search.
- * No placeholder UI; all logic lives in this file.
- */
-
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
-import { getValidAccessToken, spotifyFetch } from "@/lib/spotify-api";
+import { SPOTIFY_DATA_STORAGE_KEY } from "@/lib/spotify-api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,15 +31,7 @@ type FashionSearchResponse = {
   total: number;
 };
 
-type SpotifyPlaylistTrackItem = {
-  track: {
-    artists?: { name?: string }[];
-  } | null;
-};
-
-type SpotifyPlaylistTracksPage = {
-  items: SpotifyPlaylistTrackItem[];
-};
+type ArtistLike = { name?: string; genres?: string[] };
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -56,10 +42,10 @@ const AESTHETIC_ENDPOINT =
 const FASHION_ENDPOINT =
   "https://web-production-78bf0.up.railway.app/fashion/search";
 
-const AESTHETIC_CACHE_PREFIX = "gel_vibe_aesthetic_";
-const AESTHETIC_FETCHED_AT_PREFIX = "gel_vibe_aesthetic_fetched_at_";
-const FASHION_CACHE_PREFIX = "gel_vibe_fashion_";
-const FASHION_FETCHED_AT_PREFIX = "gel_vibe_fashion_fetched_at_";
+const AESTHETIC_CACHE_PREFIX = "gel_closet_results_";
+const AESTHETIC_FETCHED_AT_PREFIX = "gel_closet_results_fetched_at_";
+const FASHION_CACHE_PREFIX = "gel_closet_results_fashion_";
+const FASHION_FETCHED_AT_PREFIX = "gel_closet_results_fashion_fetched_at_";
 
 const STALE_MS = 24 * 60 * 60 * 1000;
 
@@ -67,26 +53,66 @@ const STALE_MS = 24 * 60 * 60 * 1000;
 // Helpers
 // ---------------------------------------------------------------------------
 
-function playlistIdToStorageKey(id: string): string {
-  return id.trim().replace(/[^a-zA-Z0-9_-]/g, "_") || "unknown";
+function genreToStorageKey(genre: string): string {
+  return (
+    genre
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_")
+      .replace(/[^a-z0-9_-]/g, "") || "unknown"
+  );
 }
 
-/** First 5 unique artist names in playlist track order. */
-function top5UniqueArtistNames(items: SpotifyPlaylistTrackItem[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const item of items) {
-    const track = item?.track;
-    if (!track?.artists?.length) continue;
-    for (const a of track.artists) {
-      const name = a?.name?.trim();
-      if (!name || seen.has(name)) continue;
-      seen.add(name);
-      out.push(name);
-      if (out.length >= 5) return out;
+function getMatchingArtistsForGenre(genre: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(SPOTIFY_DATA_STORAGE_KEY);
+    if (!raw) return [];
+    const data = JSON.parse(raw) as {
+      topArtists?: {
+        short_term?: ArtistLike[] | { items?: ArtistLike[] };
+        medium_term?: ArtistLike[] | { items?: ArtistLike[] };
+        long_term?: ArtistLike[] | { items?: ArtistLike[] };
+      };
+    };
+
+    function toArtistArray(value: unknown): ArtistLike[] {
+      if (Array.isArray(value)) return value as ArtistLike[];
+      if (
+        value &&
+        typeof value === "object" &&
+        "items" in value &&
+        Array.isArray((value as { items?: unknown[] }).items)
+      ) {
+        return (value as { items: ArtistLike[] }).items;
+      }
+      return [];
     }
+
+    const targetGenre = genre.trim().toLowerCase();
+    if (!targetGenre) return [];
+
+    const allArtists = [
+      ...toArtistArray(data.topArtists?.short_term),
+      ...toArtistArray(data.topArtists?.medium_term),
+      ...toArtistArray(data.topArtists?.long_term),
+    ];
+
+    const uniqueNames = new Set<string>();
+    for (const artist of allArtists) {
+      const name = artist?.name?.trim();
+      if (!name) continue;
+      const artistGenres = (artist?.genres ?? [])
+        .map((g) => g.trim().toLowerCase())
+        .filter(Boolean);
+      if (artistGenres.includes(targetGenre)) {
+        uniqueNames.add(name);
+      }
+    }
+    return Array.from(uniqueNames);
+  } catch {
+    return [];
   }
-  return out;
 }
 
 function isCssColor(value: string): boolean {
@@ -160,38 +186,32 @@ function ProductSkeletonGrid() {
 // Page content (needs Suspense for useSearchParams)
 // ---------------------------------------------------------------------------
 
-function MatchMyVibeResultsContent() {
+function ClosetResultsContent() {
   const searchParams = useSearchParams();
-  const playlistId = searchParams.get("playlist_id") ?? "";
-  const playlistName = searchParams.get("playlist_name") ?? "Playlist";
+  const genre = searchParams.get("genre") ?? "";
 
   const [result, setResult] = useState<AestheticResponse | null>(null);
   const [fashionItems, setFashionItems] = useState<FashionItem[]>([]);
-  const [phase, setPhase] = useState<"playlist" | "aesthetic" | "done">(
-    "playlist"
-  );
-  const [bootDone, setBootDone] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [isFashionLoading, setIsFashionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const storageKey = playlistId ? playlistIdToStorageKey(playlistId) : "";
-  const aestheticCacheKey = `${AESTHETIC_CACHE_PREFIX}${storageKey}`;
-  const aestheticFetchedAtKey = `${AESTHETIC_FETCHED_AT_PREFIX}${storageKey}`;
-  const fashionCacheKey = `${FASHION_CACHE_PREFIX}${storageKey}`;
-  const fashionFetchedAtKey = `${FASHION_FETCHED_AT_PREFIX}${storageKey}`;
-
-  const load = useCallback(
+  const fetchAesthetic = useCallback(
     async (forceRefresh = false) => {
-      if (!playlistId) {
+      if (!genre) {
         setError("Could not load recommendations. Try again.");
-        setPhase("done");
-        setBootDone(true);
+        setIsLoading(false);
         return;
       }
 
+      const storageKey = genreToStorageKey(genre);
+      const cacheKey = `${AESTHETIC_CACHE_PREFIX}${storageKey}`;
+      const fetchedAtKey = `${AESTHETIC_FETCHED_AT_PREFIX}${storageKey}`;
+      const fashionCacheKey = `${FASHION_CACHE_PREFIX}${storageKey}`;
+      const fashionFetchedAtKey = `${FASHION_FETCHED_AT_PREFIX}${storageKey}`;
+
+      setIsLoading(true);
       setError(null);
-      setBootDone(false);
-      setPhase("playlist");
 
       const fetchFashion = async (keywords: string[]) => {
         setIsFashionLoading(true);
@@ -201,8 +221,7 @@ function MatchMyVibeResultsContent() {
             const fetchedAtRaw = localStorage.getItem(fashionFetchedAtKey);
             const fetchedAt = fetchedAtRaw ? parseInt(fetchedAtRaw, 10) : NaN;
             const isFresh =
-              Number.isFinite(fetchedAt) &&
-              Date.now() - fetchedAt <= STALE_MS;
+              Number.isFinite(fetchedAt) && Date.now() - fetchedAt <= STALE_MS;
             if (cached && isFresh) {
               setFashionItems(JSON.parse(cached) as FashionItem[]);
               return;
@@ -210,7 +229,7 @@ function MatchMyVibeResultsContent() {
           }
 
           const { budgetMin, budgetMax, gender } = getOnboardingFilters();
-          console.log("[Match My Vibe] Fetching fashion:", { keywords: keywords.slice(0, 3), budgetMin, budgetMax, gender });
+          console.log("[Build My Closet] Fetching fashion:", { keywords: keywords.slice(0, 3), budgetMin, budgetMax, gender });
           const fashionRes = await fetch(FASHION_ENDPOINT, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -223,14 +242,13 @@ function MatchMyVibeResultsContent() {
             }),
           });
 
-          if (!fashionRes.ok) {
+          if (!fashionRes.ok)
             throw new Error(`Fashion request failed: ${fashionRes.status}`);
-          }
 
           const fashionPayload =
             (await fashionRes.json()) as FashionSearchResponse;
           const items = fashionPayload.items ?? [];
-          console.log("[Match My Vibe] Fashion returned", items.length, "items");
+          console.log("[Build My Closet] Fashion returned", items.length, "items");
           setFashionItems(items);
 
           if (typeof window !== "undefined") {
@@ -238,109 +256,76 @@ function MatchMyVibeResultsContent() {
             localStorage.setItem(fashionFetchedAtKey, Date.now().toString());
           }
         } catch (fashionErr) {
-          console.error("[Match My Vibe] Fashion fetch failed:", fashionErr);
+          console.error("[Build My Closet] Fashion fetch failed:", fashionErr);
           // Don't rethrow — aesthetic result should still display
         } finally {
           setIsFashionLoading(false);
         }
       };
 
-      try {
-        if (!forceRefresh && typeof window !== "undefined") {
-          try {
-            const cached = localStorage.getItem(aestheticCacheKey);
-            const fetchedAtRaw = localStorage.getItem(aestheticFetchedAtKey);
-            const fetchedAt = fetchedAtRaw ? parseInt(fetchedAtRaw, 10) : NaN;
-            const isFresh =
-              Number.isFinite(fetchedAt) &&
-              Date.now() - fetchedAt <= STALE_MS;
-            if (cached && isFresh) {
-              const parsed = JSON.parse(cached) as AestheticResponse;
-              setResult(parsed);
-              setPhase("done");
-              await fetchFashion(parsed.ebay_search_keywords ?? []);
-              return;
-            }
-          } catch {
-            /* continue to network */
+      // Check aesthetic cache
+      if (!forceRefresh && typeof window !== "undefined") {
+        try {
+          const cached = localStorage.getItem(cacheKey);
+          const fetchedAtRaw = localStorage.getItem(fetchedAtKey);
+          const fetchedAt = fetchedAtRaw ? parseInt(fetchedAtRaw, 10) : NaN;
+          const isFresh =
+            Number.isFinite(fetchedAt) && Date.now() - fetchedAt <= STALE_MS;
+          if (cached && isFresh) {
+            const parsed = JSON.parse(cached) as AestheticResponse;
+            setResult(parsed);
+            setIsLoading(false);
+            await fetchFashion(parsed.ebay_search_keywords ?? []);
+            return;
           }
+        } catch {
+          // continue to network fetch
         }
+      }
 
-        setPhase("playlist");
-        const token = await getValidAccessToken();
-        if (!token) throw new Error("No Spotify session — please reconnect Spotify");
-
-        const tracksUrl = `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}/tracks?limit=50`;
-        console.log("[Match My Vibe] Fetching playlist tracks:", playlistId);
-        const { data } = await spotifyFetch<SpotifyPlaylistTracksPage>(
-          tracksUrl,
-          token
-        );
-
-        const artists = top5UniqueArtistNames(data.items ?? []);
-        console.log("[Match My Vibe] Artists from playlist:", artists);
-        const genre = playlistName;
-
-        setPhase("aesthetic");
-        console.log("[Match My Vibe] Fetching aesthetic for genre:", genre);
-        const aestheticRes = await fetch(AESTHETIC_ENDPOINT, {
+      try {
+        const artists = getMatchingArtistsForGenre(genre);
+        console.log("[Build My Closet] Fetching aesthetic for:", genre, "artists:", artists.slice(0, 3));
+        const res = await fetch(AESTHETIC_ENDPOINT, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ genre, artists }),
         });
 
-        if (!aestheticRes.ok) {
-          throw new Error(`Aesthetic request failed: ${aestheticRes.status}`);
-        }
+        if (!res.ok) throw new Error(`Aesthetic request failed: ${res.status}`);
 
-        const payload = (await aestheticRes.json()) as AestheticResponse;
-        console.log("[Match My Vibe] Aesthetic loaded:", payload.aesthetic_label);
+        const payload = (await res.json()) as AestheticResponse;
+        console.log("[Build My Closet] Aesthetic loaded:", payload.aesthetic_label);
         setResult(payload);
-        setPhase("done");
 
         if (typeof window !== "undefined") {
-          localStorage.setItem(aestheticCacheKey, JSON.stringify(payload));
-          localStorage.setItem(aestheticFetchedAtKey, Date.now().toString());
+          localStorage.setItem(cacheKey, JSON.stringify(payload));
+          localStorage.setItem(fetchedAtKey, Date.now().toString());
         }
 
         await fetchFashion(payload.ebay_search_keywords ?? []);
       } catch (err) {
-        console.error("[Match My Vibe] Load failed:", err);
+        console.error("[Build My Closet] Load failed:", err);
         setError("Could not load recommendations. Try again.");
-        setPhase("done");
       } finally {
-        setBootDone(true);
+        setIsLoading(false);
       }
     },
-    [
-      playlistId,
-      playlistName,
-      aestheticCacheKey,
-      aestheticFetchedAtKey,
-      fashionCacheKey,
-      fashionFetchedAtKey,
-    ]
+    [genre]
   );
 
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  const isLoading =
-    !bootDone || phase === "playlist" || phase === "aesthetic";
-  const loadingMessage =
-    phase === "playlist"
-      ? "Reading your playlist..."
-      : "Decoding the vibe...";
+    void fetchAesthetic();
+  }, [fetchAesthetic]);
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] px-5 pb-12 pt-6">
       <div className="mx-auto max-w-md">
         <header className="flex items-center gap-4 mb-8">
           <Link
-            href="/match-my-vibe"
+            href="/build-my-closet"
             className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1c1c1c] border border-[rgba(255,255,255,0.08)] text-white transition hover:border-[rgba(255,255,255,0.22)] duration-200"
-            aria-label="Back to Match My Vibe"
+            aria-label="Back to Build My Closet"
           >
             <svg
               className="h-5 w-5"
@@ -362,7 +347,7 @@ function MatchMyVibeResultsContent() {
           <div className="min-h-[50vh] flex flex-col items-center justify-center text-center">
             <div className="h-10 w-10 rounded-full border-2 border-white/20 border-t-white animate-spin" />
             <p className="mt-4 text-[15px] text-[#a1a1aa]">
-              {loadingMessage}
+              Decoding your aesthetic...
             </p>
           </div>
         ) : error || !result ? (
@@ -372,7 +357,7 @@ function MatchMyVibeResultsContent() {
             </p>
             <button
               type="button"
-              onClick={() => void load(true)}
+              onClick={() => void fetchAesthetic(true)}
               className="mt-4 h-11 rounded-xl bg-[#22c55e] px-5 font-semibold text-black transition hover:bg-[#22c55e]/90 duration-200"
             >
               Retry
@@ -467,7 +452,7 @@ function MatchMyVibeResultsContent() {
 // Default export
 // ---------------------------------------------------------------------------
 
-export default function MatchMyVibeResultsPage() {
+export default function BuildMyClosetResultsPage() {
   return (
     <Suspense
       fallback={
@@ -476,7 +461,7 @@ export default function MatchMyVibeResultsPage() {
         </div>
       }
     >
-      <MatchMyVibeResultsContent />
+      <ClosetResultsContent />
     </Suspense>
   );
 }
