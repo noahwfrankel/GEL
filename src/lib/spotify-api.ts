@@ -71,6 +71,20 @@ export async function getValidAccessToken(): Promise<string | null> {
 }
 
 /**
+ * Clear all Spotify tokens and cached data so the user is re-prompted for
+ * OAuth consent on next login (required when scopes change).
+ */
+export function disconnectSpotify(): void {
+  if (typeof window === "undefined") return;
+  [
+    TOKEN_STORAGE_KEY,
+    SPOTIFY_DATA_STORAGE_KEY,
+    SPOTIFY_FETCHED_AT_KEY,
+    "gel_spotify_connected",
+  ].forEach((key) => localStorage.removeItem(key));
+}
+
+/**
  * Call Spotify API; if 401, refresh token and retry once.
  */
 export async function spotifyFetch<T>(
