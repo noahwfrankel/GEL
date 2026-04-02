@@ -9,7 +9,8 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
-import { getValidAccessToken, spotifyFetch } from "@/lib/spotify-api";
+import { getValidAccessToken, spotifyFetch, SPOTIFY_DATA_STORAGE_KEY } from "@/lib/spotify-api";
+import type { SpotifyData } from "@/lib/spotify-api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,6 +88,19 @@ function top5UniqueArtistNames(items: SpotifyPlaylistTrackItem[]): string[] {
     }
   }
   return out;
+}
+
+/** Look up stored playlist owner ID from cached Spotify data. */
+function getStoredPlaylistOwnerId(id: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(SPOTIFY_DATA_STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as SpotifyData;
+    return data.playlists?.find((p) => p.id === id)?.owner_id ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function isCssColor(value: string): boolean {
@@ -273,42 +287,80 @@ function MatchMyVibeResultsContent() {
         const token = await getValidAccessToken();
         if (!token) throw new Error("No Spotify session — please reconnect Spotify");
 
-        const tracksUrl = `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}/tracks?limit=50`;
-        console.log("[Match My Vibe] Fetching tracks for playlist:", playlistId, "name:", playlistName);
+        // Determine playlist ownership from cached Spotify data.
+        const ownerId = getStoredPlaylistOwnerId(playlistId);
+        const isSpotifyOwned = ownerId?.startsWith("spotify") ?? false;
 
-        let data: SpotifyPlaylistTracksPage;
-        try {
-          const result = await spotifyFetch<SpotifyPlaylistTracksPage>(tracksUrl, token);
-          data = result.data;
-        } catch (spotifyErr) {
-          const msg = spotifyErr instanceof Error ? spotifyErr.message : String(spotifyErr);
-          console.error("[Match My Vibe] Spotify tracks fetch error:", msg);
-          if (msg.includes("403")) {
-            setError("This playlist is private or unavailable.");
-            setCanRetry(false);
-          } else {
-            setError("Could not read this playlist. Try again.");
+        let artists: string[] = [];
+        let genre = playlistName;
+
+        if (isSpotifyOwned) {
+          // Editorial/Spotify-curated playlists: tracks endpoint returns 403.
+          // Use the playlist object metadata instead.
+          console.log("[Match My Vibe] Editorial playlist — fetching metadata, skipping tracks");
+          try {
+            const { data: plMeta } = await spotifyFetch<{ name: string }>(
+              `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}`,
+              token
+            );
+            genre = plMeta.name ?? playlistName;
+            console.log("[Match My Vibe] Metadata genre:", genre);
+          } catch {
+            console.warn("[Match My Vibe] Could not fetch playlist metadata, using name from URL");
           }
-          setPhase("done");
-          setBootDone(true);
-          return;
+          // artists stays [] — editorial playlists have no accessible track list
+        } else {
+          const tracksUrl = `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}/tracks?limit=50`;
+          console.log("[Match My Vibe] Fetching tracks for playlist:", playlistId, "name:", playlistName);
+
+          let tracksData: SpotifyPlaylistTracksPage | null = null;
+          try {
+            const result = await spotifyFetch<SpotifyPlaylistTracksPage>(tracksUrl, token);
+            tracksData = result.data;
+          } catch (spotifyErr) {
+            const msg = spotifyErr instanceof Error ? spotifyErr.message : String(spotifyErr);
+            console.error("[Match My Vibe] Tracks fetch error:", msg);
+            if (msg.includes("403")) {
+              // Fallback: try the playlist object for at least name/genre.
+              console.log("[Match My Vibe] 403 on tracks — trying playlist object fallback");
+              try {
+                const { data: plMeta } = await spotifyFetch<{ name: string }>(
+                  `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}`,
+                  token
+                );
+                genre = plMeta.name ?? playlistName;
+                console.log("[Match My Vibe] Fallback metadata loaded, genre:", genre);
+                // artists stays [] — can't read tracks
+              } catch {
+                setError("This playlist is private or unavailable.");
+                setCanRetry(false);
+                setPhase("done");
+                setBootDone(true);
+                return;
+              }
+            } else {
+              setError("Could not read this playlist. Try again.");
+              setPhase("done");
+              setBootDone(true);
+              return;
+            }
+          }
+
+          if (tracksData) {
+            const trackCount = tracksData.items?.length ?? 0;
+            console.log("[Match My Vibe] Tracks returned:", trackCount);
+            if (trackCount === 0) {
+              console.log("[Match My Vibe] Playlist is empty");
+              setError("This playlist is empty — add some songs and come back.");
+              setCanRetry(false);
+              setPhase("done");
+              setBootDone(true);
+              return;
+            }
+            artists = top5UniqueArtistNames(tracksData.items);
+            console.log("[Match My Vibe] Artists extracted:", artists);
+          }
         }
-
-        const trackCount = data.items?.length ?? 0;
-        console.log("[Match My Vibe] Tracks returned:", trackCount);
-
-        if (trackCount === 0) {
-          console.log("[Match My Vibe] Playlist is empty");
-          setError("This playlist is empty — add some songs and come back.");
-          setCanRetry(false);
-          setPhase("done");
-          setBootDone(true);
-          return;
-        }
-
-        const artists = top5UniqueArtistNames(data.items);
-        console.log("[Match My Vibe] Artists extracted:", artists);
-        const genre = playlistName;
 
         setPhase("aesthetic");
         console.log("[Match My Vibe] Fetching aesthetic — genre:", genre, "artists:", artists);
