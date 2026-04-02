@@ -173,6 +173,7 @@ function MatchMyVibeResultsContent() {
   const [bootDone, setBootDone] = useState(false);
   const [isFashionLoading, setIsFashionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [canRetry, setCanRetry] = useState(true);
 
   const storageKey = playlistId ? playlistIdToStorageKey(playlistId) : "";
   const aestheticCacheKey = `${AESTHETIC_CACHE_PREFIX}${storageKey}`;
@@ -190,8 +191,10 @@ function MatchMyVibeResultsContent() {
       }
 
       setError(null);
+      setCanRetry(true);
       setBootDone(false);
       setPhase("playlist");
+      console.log("[Match My Vibe] Starting load for playlist:", playlistId, "| cache key:", playlistIdToStorageKey(playlistId));
 
       const fetchFashion = async (keywords: string[]) => {
         setIsFashionLoading(true);
@@ -271,18 +274,44 @@ function MatchMyVibeResultsContent() {
         if (!token) throw new Error("No Spotify session — please reconnect Spotify");
 
         const tracksUrl = `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}/tracks?limit=50`;
-        console.log("[Match My Vibe] Fetching playlist tracks:", playlistId);
-        const { data } = await spotifyFetch<SpotifyPlaylistTracksPage>(
-          tracksUrl,
-          token
-        );
+        console.log("[Match My Vibe] Fetching tracks for playlist:", playlistId, "name:", playlistName);
 
-        const artists = top5UniqueArtistNames(data.items ?? []);
-        console.log("[Match My Vibe] Artists from playlist:", artists);
+        let data: SpotifyPlaylistTracksPage;
+        try {
+          const result = await spotifyFetch<SpotifyPlaylistTracksPage>(tracksUrl, token);
+          data = result.data;
+        } catch (spotifyErr) {
+          const msg = spotifyErr instanceof Error ? spotifyErr.message : String(spotifyErr);
+          console.error("[Match My Vibe] Spotify tracks fetch error:", msg);
+          if (msg.includes("403")) {
+            setError("This playlist is private or unavailable.");
+            setCanRetry(false);
+          } else {
+            setError("Could not read this playlist. Try again.");
+          }
+          setPhase("done");
+          setBootDone(true);
+          return;
+        }
+
+        const trackCount = data.items?.length ?? 0;
+        console.log("[Match My Vibe] Tracks returned:", trackCount);
+
+        if (trackCount === 0) {
+          console.log("[Match My Vibe] Playlist is empty");
+          setError("This playlist is empty — add some songs and come back.");
+          setCanRetry(false);
+          setPhase("done");
+          setBootDone(true);
+          return;
+        }
+
+        const artists = top5UniqueArtistNames(data.items);
+        console.log("[Match My Vibe] Artists extracted:", artists);
         const genre = playlistName;
 
         setPhase("aesthetic");
-        console.log("[Match My Vibe] Fetching aesthetic for genre:", genre);
+        console.log("[Match My Vibe] Fetching aesthetic — genre:", genre, "artists:", artists);
         const aestheticRes = await fetch(AESTHETIC_ENDPOINT, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -366,17 +395,19 @@ function MatchMyVibeResultsContent() {
             </p>
           </div>
         ) : error || !result ? (
-          <div className="min-h-[50vh] flex flex-col items-center justify-center text-center">
+          <div className="min-h-[50vh] flex flex-col items-center justify-center text-center px-4">
             <p className="text-[15px] text-[#a1a1aa]">
-              Could not load recommendations. Try again.
+              {error ?? "Could not load recommendations. Try again."}
             </p>
-            <button
-              type="button"
-              onClick={() => void load(true)}
-              className="mt-4 h-11 rounded-xl bg-[#22c55e] px-5 font-semibold text-black transition hover:bg-[#22c55e]/90 duration-200"
-            >
-              Retry
-            </button>
+            {canRetry && (
+              <button
+                type="button"
+                onClick={() => void load(true)}
+                className="mt-4 h-11 rounded-xl bg-[#22c55e] px-5 font-semibold text-black transition hover:bg-[#22c55e]/90 duration-200"
+              >
+                Retry
+              </button>
+            )}
           </div>
         ) : (
           <>
