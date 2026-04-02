@@ -122,6 +122,9 @@ export type StoredPlaylistItem = {
   images: { url: string; height: number | null; width: number | null }[];
   tracks: { total: number };
   owner: { display_name: string };
+  /** Spotify user ID of the playlist owner. "spotify" prefix = editorial playlist. */
+  owner_id?: string;
+  collaborative?: boolean;
 };
 
 /** Full artist object as returned by Spotify (e.g. /me/top/artists). Keep genres & popularity for Find My Niche. */
@@ -208,7 +211,8 @@ export async function fetchAndStoreSpotifyData(): Promise<SpotifyData | null> {
       description: string | null;
       images: { url: string; height: number | null; width: number | null }[];
       tracks: { total: number };
-      owner: { display_name: string };
+      owner: { display_name: string; id: string };
+      collaborative: boolean;
     }[];
   };
   const { data: playlistsData, newToken: playlistsToken }: { data: PlaylistsResponse; newToken: string | null } =
@@ -221,6 +225,8 @@ export async function fetchAndStoreSpotifyData(): Promise<SpotifyData | null> {
     images: p.images ?? [],
     tracks: { total: p.tracks?.total ?? 0 },
     owner: { display_name: p.owner?.display_name ?? "" },
+    owner_id: p.owner?.id ?? "",
+    collaborative: p.collaborative ?? false,
   }));
 
   const result: SpotifyData = {
