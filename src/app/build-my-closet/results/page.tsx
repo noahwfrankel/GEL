@@ -2,8 +2,15 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { SPOTIFY_DATA_STORAGE_KEY } from "@/lib/spotify-api";
+import {
+  getSeenItemIds,
+  addSeenItemIds,
+  trackInteraction,
+  type FashionItem,
+} from "@/lib/storage-utils";
+import { ProductCard, itemStableId } from "@/components/ProductCard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -15,15 +22,6 @@ type AestheticResponse = {
   colors: string[];
   key_garments: string[];
   ebay_search_keywords: string[];
-};
-
-type FashionItem = {
-  title: string;
-  price: number;
-  image_url: string;
-  item_url: string;
-  condition: string;
-  source: string;
 };
 
 type FashionSearchResponse = {
@@ -105,9 +103,7 @@ function getMatchingArtistsForGenre(genre: string): string[] {
       const artistGenres = (artist?.genres ?? [])
         .map((g) => g.trim().toLowerCase())
         .filter(Boolean);
-      if (artistGenres.includes(targetGenre)) {
-        uniqueNames.add(name);
-      }
+      if (artistGenres.includes(targetGenre)) uniqueNames.add(name);
     }
     return Array.from(uniqueNames);
   } catch {
@@ -121,11 +117,6 @@ function isCssColor(value: string): boolean {
   el.color = "";
   el.color = value;
   return el.color !== "";
-}
-
-function formatPrice(value: number): string {
-  if (!Number.isFinite(value)) return "$0.00";
-  return `$${value.toFixed(2)}`;
 }
 
 function getGenderFromFitPreferences(
@@ -173,7 +164,7 @@ function ProductSkeletonGrid() {
       {Array.from({ length: 6 }).map((_, i) => (
         <div
           key={i}
-          className="h-[160px] rounded-xl bg-[#141414] border border-[rgba(255,255,255,0.08)] animate-pulse-skeleton flex items-center justify-center"
+          className="h-[160px] rounded-[14px] bg-[#141414] border border-[rgba(255,255,255,0.08)] animate-pulse-skeleton flex items-center justify-center"
         >
           <span className="text-[12px] text-[#52525b]">Finding items...</span>
         </div>
@@ -190,11 +181,90 @@ function ClosetResultsContent() {
   const searchParams = useSearchParams();
   const genre = searchParams.get("genre") ?? "";
 
+  const storageKey = useMemo(() => genreToStorageKey(genre), [genre]);
+  const aestheticCacheKey = `${AESTHETIC_CACHE_PREFIX}${storageKey}`;
+  const aestheticFetchedAtKey = `${AESTHETIC_FETCHED_AT_PREFIX}${storageKey}`;
+  const fashionCacheKey = `${FASHION_CACHE_PREFIX}${storageKey}`;
+  const fashionFetchedAtKey = `${FASHION_FETCHED_AT_PREFIX}${storageKey}`;
+
   const [result, setResult] = useState<AestheticResponse | null>(null);
   const [fashionItems, setFashionItems] = useState<FashionItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isFashionLoading, setIsFashionLoading] = useState(false);
+  const [isRefreshingFashion, setIsRefreshingFashion] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const fetchFashion = useCallback(
+    async (keywords: string[], forceRefresh: boolean) => {
+      setIsFashionLoading(true);
+      try {
+        if (!forceRefresh && typeof window !== "undefined") {
+          const cached = localStorage.getItem(fashionCacheKey);
+          const fetchedAtRaw = localStorage.getItem(fashionFetchedAtKey);
+          const fetchedAt = fetchedAtRaw ? parseInt(fetchedAtRaw, 10) : NaN;
+          const isFresh =
+            Number.isFinite(fetchedAt) && Date.now() - fetchedAt <= STALE_MS;
+          if (cached && isFresh) {
+            setFashionItems(JSON.parse(cached) as FashionItem[]);
+            return;
+          }
+        }
+
+        const { budgetMin, budgetMax, gender } = getOnboardingFilters();
+        const seenIds = getSeenItemIds();
+        console.log("[Build My Closet] Fetching fashion:", { keywords: keywords.slice(0, 3), budgetMin, budgetMax, gender });
+        const fashionRes = await fetch(FASHION_ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            keywords,
+            budget_min: budgetMin,
+            budget_max: budgetMax,
+            gender,
+            limit: 12,
+            excluded_item_ids: seenIds,
+          }),
+        });
+
+        if (!fashionRes.ok)
+          throw new Error(`Fashion request failed: ${fashionRes.status}`);
+
+        const fashionPayload =
+          (await fashionRes.json()) as FashionSearchResponse;
+        const items = fashionPayload.items ?? [];
+        console.log("[Build My Closet] Fashion returned", items.length, "items");
+        setFashionItems(items);
+
+        // Track seen + viewed
+        addSeenItemIds(items.map((i) => itemStableId(i)));
+        items.forEach((item) => {
+          trackInteraction({
+            item_id: itemStableId(item),
+            item_title: item.title,
+            genre,
+            action: "viewed",
+            timestamp: Date.now(),
+            price: item.price,
+            source: "build_my_closet",
+            image_url: item.image_url,
+            item_url: item.item_url,
+            condition: item.condition,
+          });
+        });
+
+        if (typeof window !== "undefined") {
+          localStorage.setItem(fashionCacheKey, JSON.stringify(items));
+          localStorage.setItem(fashionFetchedAtKey, Date.now().toString());
+        }
+      } catch (fashionErr) {
+        console.error("[Build My Closet] Fashion fetch failed:", fashionErr);
+        // Don't rethrow — aesthetic result should still display
+      } finally {
+        setIsFashionLoading(false);
+      }
+    },
+    [fashionCacheKey, fashionFetchedAtKey, genre]
+  );
 
   const fetchAesthetic = useCallback(
     async (forceRefresh = false) => {
@@ -204,70 +274,13 @@ function ClosetResultsContent() {
         return;
       }
 
-      const storageKey = genreToStorageKey(genre);
-      const cacheKey = `${AESTHETIC_CACHE_PREFIX}${storageKey}`;
-      const fetchedAtKey = `${AESTHETIC_FETCHED_AT_PREFIX}${storageKey}`;
-      const fashionCacheKey = `${FASHION_CACHE_PREFIX}${storageKey}`;
-      const fashionFetchedAtKey = `${FASHION_FETCHED_AT_PREFIX}${storageKey}`;
-
       setIsLoading(true);
       setError(null);
 
-      const fetchFashion = async (keywords: string[]) => {
-        setIsFashionLoading(true);
-        try {
-          if (!forceRefresh && typeof window !== "undefined") {
-            const cached = localStorage.getItem(fashionCacheKey);
-            const fetchedAtRaw = localStorage.getItem(fashionFetchedAtKey);
-            const fetchedAt = fetchedAtRaw ? parseInt(fetchedAtRaw, 10) : NaN;
-            const isFresh =
-              Number.isFinite(fetchedAt) && Date.now() - fetchedAt <= STALE_MS;
-            if (cached && isFresh) {
-              setFashionItems(JSON.parse(cached) as FashionItem[]);
-              return;
-            }
-          }
-
-          const { budgetMin, budgetMax, gender } = getOnboardingFilters();
-          console.log("[Build My Closet] Fetching fashion:", { keywords: keywords.slice(0, 3), budgetMin, budgetMax, gender });
-          const fashionRes = await fetch(FASHION_ENDPOINT, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              keywords,
-              budget_min: budgetMin,
-              budget_max: budgetMax,
-              gender,
-              limit: 12,
-            }),
-          });
-
-          if (!fashionRes.ok)
-            throw new Error(`Fashion request failed: ${fashionRes.status}`);
-
-          const fashionPayload =
-            (await fashionRes.json()) as FashionSearchResponse;
-          const items = fashionPayload.items ?? [];
-          console.log("[Build My Closet] Fashion returned", items.length, "items");
-          setFashionItems(items);
-
-          if (typeof window !== "undefined") {
-            localStorage.setItem(fashionCacheKey, JSON.stringify(items));
-            localStorage.setItem(fashionFetchedAtKey, Date.now().toString());
-          }
-        } catch (fashionErr) {
-          console.error("[Build My Closet] Fashion fetch failed:", fashionErr);
-          // Don't rethrow — aesthetic result should still display
-        } finally {
-          setIsFashionLoading(false);
-        }
-      };
-
-      // Check aesthetic cache
       if (!forceRefresh && typeof window !== "undefined") {
         try {
-          const cached = localStorage.getItem(cacheKey);
-          const fetchedAtRaw = localStorage.getItem(fetchedAtKey);
+          const cached = localStorage.getItem(aestheticCacheKey);
+          const fetchedAtRaw = localStorage.getItem(aestheticFetchedAtKey);
           const fetchedAt = fetchedAtRaw ? parseInt(fetchedAtRaw, 10) : NaN;
           const isFresh =
             Number.isFinite(fetchedAt) && Date.now() - fetchedAt <= STALE_MS;
@@ -275,7 +288,7 @@ function ClosetResultsContent() {
             const parsed = JSON.parse(cached) as AestheticResponse;
             setResult(parsed);
             setIsLoading(false);
-            await fetchFashion(parsed.ebay_search_keywords ?? []);
+            await fetchFashion(parsed.ebay_search_keywords ?? [], false);
             return;
           }
         } catch {
@@ -299,11 +312,11 @@ function ClosetResultsContent() {
         setResult(payload);
 
         if (typeof window !== "undefined") {
-          localStorage.setItem(cacheKey, JSON.stringify(payload));
-          localStorage.setItem(fetchedAtKey, Date.now().toString());
+          localStorage.setItem(aestheticCacheKey, JSON.stringify(payload));
+          localStorage.setItem(aestheticFetchedAtKey, Date.now().toString());
         }
 
-        await fetchFashion(payload.ebay_search_keywords ?? []);
+        await fetchFashion(payload.ebay_search_keywords ?? [], forceRefresh);
       } catch (err) {
         console.error("[Build My Closet] Load failed:", err);
         setError("Could not load recommendations. Try again.");
@@ -311,8 +324,19 @@ function ClosetResultsContent() {
         setIsLoading(false);
       }
     },
-    [genre]
+    [genre, aestheticCacheKey, aestheticFetchedAtKey, fetchFashion]
   );
+
+  const handleRefreshFashion = useCallback(async () => {
+    if (!result) return;
+    setIsRefreshingFashion(true);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(fashionCacheKey);
+      localStorage.removeItem(fashionFetchedAtKey);
+    }
+    await fetchFashion(result.ebay_search_keywords ?? [], true);
+    setIsRefreshingFashion(false);
+  }, [result, fashionCacheKey, fashionFetchedAtKey, fetchFashion]);
 
   useEffect(() => {
     void fetchAesthetic();
@@ -411,35 +435,30 @@ function ClosetResultsContent() {
             {isFashionLoading ? (
               <ProductSkeletonGrid />
             ) : (
-              <div className="grid grid-cols-2 gap-3 mt-8">
-                {fashionItems.map((item) => (
-                  <a
-                    key={`${item.item_url}-${item.title}`}
-                    href={item.item_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="overflow-hidden rounded-xl border border-[rgba(255,255,255,0.08)] bg-[#141414] transition hover:border-[rgba(255,255,255,0.16)]"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element -- remote eBay URLs */}
-                    <img
-                      src={item.image_url}
-                      alt={item.title}
-                      className="w-full h-[180px] object-cover rounded-t-xl"
+              <>
+                <div className="grid grid-cols-2 gap-3 mt-8">
+                  {fashionItems.map((item) => (
+                    <ProductCard
+                      key={itemStableId(item)}
+                      item={item}
+                      genre={genre}
+                      source="build_my_closet"
                     />
-                    <div className="p-3">
-                      <p className="text-[14px] text-white leading-[1.35] line-clamp-2">
-                        {item.title}
-                      </p>
-                      <p className="mt-2 text-[16px] font-semibold text-[#22c55e]">
-                        {formatPrice(item.price)}
-                      </p>
-                      <span className="mt-1 inline-block text-[11px] text-[#71717a]">
-                        {item.condition || "Pre-owned"}
-                      </span>
-                    </div>
-                  </a>
-                ))}
-              </div>
+                  ))}
+                </div>
+                {fashionItems.length > 0 && (
+                  <div className="mt-4 flex justify-center">
+                    <button
+                      type="button"
+                      onClick={() => void handleRefreshFashion()}
+                      disabled={isRefreshingFashion}
+                      className="h-9 rounded-xl border border-[rgba(255,255,255,0.12)] bg-transparent px-4 text-[13px] text-[#a1a1aa] transition hover:border-[rgba(255,255,255,0.22)] hover:text-white duration-200 disabled:opacity-50"
+                    >
+                      {isRefreshingFashion ? "Refreshing..." : "Refresh items"}
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </>
         )}

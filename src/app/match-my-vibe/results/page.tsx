@@ -3,14 +3,24 @@
 /**
  * Match My Vibe — results for a single playlist.
  * Spotify playlist tracks → top 5 unique artist names → aesthetic API → fashion search.
- * No placeholder UI; all logic lives in this file.
  */
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useState } from "react";
-import { getValidAccessToken, spotifyFetch, SPOTIFY_DATA_STORAGE_KEY } from "@/lib/spotify-api";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  getValidAccessToken,
+  spotifyFetch,
+  SPOTIFY_DATA_STORAGE_KEY,
+} from "@/lib/spotify-api";
 import type { SpotifyData } from "@/lib/spotify-api";
+import {
+  getSeenItemIds,
+  addSeenItemIds,
+  trackInteraction,
+  type FashionItem,
+} from "@/lib/storage-utils";
+import { ProductCard, itemStableId } from "@/components/ProductCard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -22,15 +32,6 @@ type AestheticResponse = {
   colors: string[];
   key_garments: string[];
   ebay_search_keywords: string[];
-};
-
-type FashionItem = {
-  title: string;
-  price: number;
-  image_url: string;
-  item_url: string;
-  condition: string;
-  source: string;
 };
 
 type FashionSearchResponse = {
@@ -111,11 +112,6 @@ function isCssColor(value: string): boolean {
   return el.color !== "";
 }
 
-function formatPrice(value: number): string {
-  if (!Number.isFinite(value)) return "$0.00";
-  return `$${value.toFixed(2)}`;
-}
-
 function getGenderFromFitPreferences(
   value: unknown
 ): "mens" | "womens" | "unisex" {
@@ -161,7 +157,7 @@ function ProductSkeletonGrid() {
       {Array.from({ length: 6 }).map((_, i) => (
         <div
           key={i}
-          className="h-[160px] rounded-xl bg-[#141414] border border-[rgba(255,255,255,0.08)] animate-pulse-skeleton flex items-center justify-center"
+          className="h-[160px] rounded-[14px] bg-[#141414] border border-[rgba(255,255,255,0.08)] animate-pulse-skeleton flex items-center justify-center"
         >
           <span className="text-[12px] text-[#52525b]">Finding items...</span>
         </div>
@@ -179,6 +175,15 @@ function MatchMyVibeResultsContent() {
   const playlistId = searchParams.get("playlist_id") ?? "";
   const playlistName = searchParams.get("playlist_name") ?? "Playlist";
 
+  const storageKey = useMemo(
+    () => (playlistId ? playlistIdToStorageKey(playlistId) : ""),
+    [playlistId]
+  );
+  const aestheticCacheKey = `${AESTHETIC_CACHE_PREFIX}${storageKey}`;
+  const aestheticFetchedAtKey = `${AESTHETIC_FETCHED_AT_PREFIX}${storageKey}`;
+  const fashionCacheKey = `${FASHION_CACHE_PREFIX}${storageKey}`;
+  const fashionFetchedAtKey = `${FASHION_FETCHED_AT_PREFIX}${storageKey}`;
+
   const [result, setResult] = useState<AestheticResponse | null>(null);
   const [fashionItems, setFashionItems] = useState<FashionItem[]>([]);
   const [phase, setPhase] = useState<"playlist" | "aesthetic" | "done">(
@@ -186,14 +191,82 @@ function MatchMyVibeResultsContent() {
   );
   const [bootDone, setBootDone] = useState(false);
   const [isFashionLoading, setIsFashionLoading] = useState(false);
+  const [isRefreshingFashion, setIsRefreshingFashion] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [canRetry, setCanRetry] = useState(true);
 
-  const storageKey = playlistId ? playlistIdToStorageKey(playlistId) : "";
-  const aestheticCacheKey = `${AESTHETIC_CACHE_PREFIX}${storageKey}`;
-  const aestheticFetchedAtKey = `${AESTHETIC_FETCHED_AT_PREFIX}${storageKey}`;
-  const fashionCacheKey = `${FASHION_CACHE_PREFIX}${storageKey}`;
-  const fashionFetchedAtKey = `${FASHION_FETCHED_AT_PREFIX}${storageKey}`;
+  const fetchFashion = useCallback(
+    async (keywords: string[], forceRefresh: boolean) => {
+      setIsFashionLoading(true);
+      try {
+        if (!forceRefresh && typeof window !== "undefined") {
+          const cached = localStorage.getItem(fashionCacheKey);
+          const fetchedAtRaw = localStorage.getItem(fashionFetchedAtKey);
+          const fetchedAt = fetchedAtRaw ? parseInt(fetchedAtRaw, 10) : NaN;
+          const isFresh =
+            Number.isFinite(fetchedAt) &&
+            Date.now() - fetchedAt <= STALE_MS;
+          if (cached && isFresh) {
+            setFashionItems(JSON.parse(cached) as FashionItem[]);
+            return;
+          }
+        }
+
+        const { budgetMin, budgetMax, gender } = getOnboardingFilters();
+        const seenIds = getSeenItemIds();
+        console.log("[Match My Vibe] Fetching fashion:", { keywords: keywords.slice(0, 3), budgetMin, budgetMax, gender });
+        const fashionRes = await fetch(FASHION_ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            keywords,
+            budget_min: budgetMin,
+            budget_max: budgetMax,
+            gender,
+            limit: 12,
+            excluded_item_ids: seenIds,
+          }),
+        });
+
+        if (!fashionRes.ok) {
+          throw new Error(`Fashion request failed: ${fashionRes.status}`);
+        }
+
+        const fashionPayload =
+          (await fashionRes.json()) as FashionSearchResponse;
+        const items = fashionPayload.items ?? [];
+        console.log("[Match My Vibe] Fashion returned", items.length, "items");
+        setFashionItems(items);
+
+        // Track seen + viewed
+        addSeenItemIds(items.map((i) => itemStableId(i)));
+        items.forEach((item) => {
+          trackInteraction({
+            item_id: itemStableId(item),
+            item_title: item.title,
+            genre: playlistName,
+            action: "viewed",
+            timestamp: Date.now(),
+            price: item.price,
+            source: "match_my_vibe",
+            image_url: item.image_url,
+            item_url: item.item_url,
+            condition: item.condition,
+          });
+        });
+
+        if (typeof window !== "undefined") {
+          localStorage.setItem(fashionCacheKey, JSON.stringify(items));
+          localStorage.setItem(fashionFetchedAtKey, Date.now().toString());
+        }
+      } catch (fashionErr) {
+        console.error("[Match My Vibe] Fashion fetch failed:", fashionErr);
+        // Don't rethrow — aesthetic result should still display
+      } finally {
+        setIsFashionLoading(false);
+      }
+    },
+    [fashionCacheKey, fashionFetchedAtKey, playlistName]
+  );
 
   const load = useCallback(
     async (forceRefresh = false) => {
@@ -205,62 +278,9 @@ function MatchMyVibeResultsContent() {
       }
 
       setError(null);
-      setCanRetry(true);
       setBootDone(false);
       setPhase("playlist");
       console.log("[Match My Vibe] Starting load for playlist:", playlistId, "| cache key:", playlistIdToStorageKey(playlistId));
-
-      const fetchFashion = async (keywords: string[]) => {
-        setIsFashionLoading(true);
-        try {
-          if (!forceRefresh && typeof window !== "undefined") {
-            const cached = localStorage.getItem(fashionCacheKey);
-            const fetchedAtRaw = localStorage.getItem(fashionFetchedAtKey);
-            const fetchedAt = fetchedAtRaw ? parseInt(fetchedAtRaw, 10) : NaN;
-            const isFresh =
-              Number.isFinite(fetchedAt) &&
-              Date.now() - fetchedAt <= STALE_MS;
-            if (cached && isFresh) {
-              setFashionItems(JSON.parse(cached) as FashionItem[]);
-              return;
-            }
-          }
-
-          const { budgetMin, budgetMax, gender } = getOnboardingFilters();
-          console.log("[Match My Vibe] Fetching fashion:", { keywords: keywords.slice(0, 3), budgetMin, budgetMax, gender });
-          const fashionRes = await fetch(FASHION_ENDPOINT, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              keywords,
-              budget_min: budgetMin,
-              budget_max: budgetMax,
-              gender,
-              limit: 12,
-            }),
-          });
-
-          if (!fashionRes.ok) {
-            throw new Error(`Fashion request failed: ${fashionRes.status}`);
-          }
-
-          const fashionPayload =
-            (await fashionRes.json()) as FashionSearchResponse;
-          const items = fashionPayload.items ?? [];
-          console.log("[Match My Vibe] Fashion returned", items.length, "items");
-          setFashionItems(items);
-
-          if (typeof window !== "undefined") {
-            localStorage.setItem(fashionCacheKey, JSON.stringify(items));
-            localStorage.setItem(fashionFetchedAtKey, Date.now().toString());
-          }
-        } catch (fashionErr) {
-          console.error("[Match My Vibe] Fashion fetch failed:", fashionErr);
-          // Don't rethrow — aesthetic result should still display
-        } finally {
-          setIsFashionLoading(false);
-        }
-      };
 
       try {
         if (!forceRefresh && typeof window !== "undefined") {
@@ -275,7 +295,7 @@ function MatchMyVibeResultsContent() {
               const parsed = JSON.parse(cached) as AestheticResponse;
               setResult(parsed);
               setPhase("done");
-              await fetchFashion(parsed.ebay_search_keywords ?? []);
+              await fetchFashion(parsed.ebay_search_keywords ?? [], false);
               return;
             }
           } catch {
@@ -287,7 +307,7 @@ function MatchMyVibeResultsContent() {
         const token = await getValidAccessToken();
         if (!token) throw new Error("No Spotify session — please reconnect Spotify");
 
-        // Determine playlist ownership from cached Spotify data.
+        // Determine ownership from cached Spotify data
         const ownerId = getStoredPlaylistOwnerId(playlistId);
         const isSpotifyOwned = ownerId?.startsWith("spotify") ?? false;
 
@@ -295,8 +315,7 @@ function MatchMyVibeResultsContent() {
         let genre = playlistName;
 
         if (isSpotifyOwned) {
-          // Editorial/Spotify-curated playlists: tracks endpoint returns 403.
-          // Use the playlist object metadata instead.
+          // Editorial/Spotify-curated: skip tracks endpoint (403), use metadata
           console.log("[Match My Vibe] Editorial playlist — fetching metadata, skipping tracks");
           try {
             const { data: plMeta } = await spotifyFetch<{ name: string }>(
@@ -308,10 +327,10 @@ function MatchMyVibeResultsContent() {
           } catch {
             console.warn("[Match My Vibe] Could not fetch playlist metadata, using name from URL");
           }
-          // artists stays [] — editorial playlists have no accessible track list
+          // artists stays [] — no track access for editorial playlists
         } else {
           const tracksUrl = `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}/tracks?limit=50`;
-          console.log("[Match My Vibe] Fetching tracks for playlist:", playlistId, "name:", playlistName);
+          console.log("[Match My Vibe] Fetching tracks for playlist:", playlistId);
 
           let tracksData: SpotifyPlaylistTracksPage | null = null;
           try {
@@ -320,8 +339,8 @@ function MatchMyVibeResultsContent() {
           } catch (spotifyErr) {
             const msg = spotifyErr instanceof Error ? spotifyErr.message : String(spotifyErr);
             console.error("[Match My Vibe] Tracks fetch error:", msg);
+            // On any 403 — never error. Try playlist object for metadata, then proceed with what we have.
             if (msg.includes("403")) {
-              // Fallback: try the playlist object for at least name/genre.
               console.log("[Match My Vibe] 403 on tracks — trying playlist object fallback");
               try {
                 const { data: plMeta } = await spotifyFetch<{ name: string }>(
@@ -330,14 +349,12 @@ function MatchMyVibeResultsContent() {
                 );
                 genre = plMeta.name ?? playlistName;
                 console.log("[Match My Vibe] Fallback metadata loaded, genre:", genre);
-                // artists stays [] — can't read tracks
               } catch {
-                setError("This playlist is private or unavailable.");
-                setCanRetry(false);
-                setPhase("done");
-                setBootDone(true);
-                return;
+                // Can't access even the playlist object — use name from URL and proceed
+                console.warn("[Match My Vibe] Playlist object also inaccessible, using URL name as genre");
+                genre = playlistName;
               }
+              // artists stays [] — proceed to aesthetic with what we have
             } else {
               setError("Could not read this playlist. Try again.");
               setPhase("done");
@@ -352,7 +369,6 @@ function MatchMyVibeResultsContent() {
             if (trackCount === 0) {
               console.log("[Match My Vibe] Playlist is empty");
               setError("This playlist is empty — add some songs and come back.");
-              setCanRetry(false);
               setPhase("done");
               setBootDone(true);
               return;
@@ -384,7 +400,7 @@ function MatchMyVibeResultsContent() {
           localStorage.setItem(aestheticFetchedAtKey, Date.now().toString());
         }
 
-        await fetchFashion(payload.ebay_search_keywords ?? []);
+        await fetchFashion(payload.ebay_search_keywords ?? [], forceRefresh);
       } catch (err) {
         console.error("[Match My Vibe] Load failed:", err);
         setError("Could not load recommendations. Try again.");
@@ -398,10 +414,20 @@ function MatchMyVibeResultsContent() {
       playlistName,
       aestheticCacheKey,
       aestheticFetchedAtKey,
-      fashionCacheKey,
-      fashionFetchedAtKey,
+      fetchFashion,
     ]
   );
+
+  const handleRefreshFashion = useCallback(async () => {
+    if (!result) return;
+    setIsRefreshingFashion(true);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(fashionCacheKey);
+      localStorage.removeItem(fashionFetchedAtKey);
+    }
+    await fetchFashion(result.ebay_search_keywords ?? [], true);
+    setIsRefreshingFashion(false);
+  }, [result, fashionCacheKey, fashionFetchedAtKey, fetchFashion]);
 
   useEffect(() => {
     void load();
@@ -451,15 +477,13 @@ function MatchMyVibeResultsContent() {
             <p className="text-[15px] text-[#a1a1aa]">
               {error ?? "Could not load recommendations. Try again."}
             </p>
-            {canRetry && (
-              <button
-                type="button"
-                onClick={() => void load(true)}
-                className="mt-4 h-11 rounded-xl bg-[#22c55e] px-5 font-semibold text-black transition hover:bg-[#22c55e]/90 duration-200"
-              >
-                Retry
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => void load(true)}
+              className="mt-4 h-11 rounded-xl bg-[#22c55e] px-5 font-semibold text-black transition hover:bg-[#22c55e]/90 duration-200"
+            >
+              Retry
+            </button>
           </div>
         ) : (
           <>
@@ -509,35 +533,30 @@ function MatchMyVibeResultsContent() {
             {isFashionLoading ? (
               <ProductSkeletonGrid />
             ) : (
-              <div className="grid grid-cols-2 gap-3 mt-8">
-                {fashionItems.map((item) => (
-                  <a
-                    key={`${item.item_url}-${item.title}`}
-                    href={item.item_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="overflow-hidden rounded-xl border border-[rgba(255,255,255,0.08)] bg-[#141414] transition hover:border-[rgba(255,255,255,0.16)]"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element -- remote eBay URLs */}
-                    <img
-                      src={item.image_url}
-                      alt={item.title}
-                      className="w-full h-[180px] object-cover rounded-t-xl"
+              <>
+                <div className="grid grid-cols-2 gap-3 mt-8">
+                  {fashionItems.map((item) => (
+                    <ProductCard
+                      key={itemStableId(item)}
+                      item={item}
+                      genre={playlistName}
+                      source="match_my_vibe"
                     />
-                    <div className="p-3">
-                      <p className="text-[14px] text-white leading-[1.35] line-clamp-2">
-                        {item.title}
-                      </p>
-                      <p className="mt-2 text-[16px] font-semibold text-[#22c55e]">
-                        {formatPrice(item.price)}
-                      </p>
-                      <span className="mt-1 inline-block text-[11px] text-[#71717a]">
-                        {item.condition || "Pre-owned"}
-                      </span>
-                    </div>
-                  </a>
-                ))}
-              </div>
+                  ))}
+                </div>
+                {fashionItems.length > 0 && (
+                  <div className="mt-4 flex justify-center">
+                    <button
+                      type="button"
+                      onClick={() => void handleRefreshFashion()}
+                      disabled={isRefreshingFashion}
+                      className="h-9 rounded-xl border border-[rgba(255,255,255,0.12)] bg-transparent px-4 text-[13px] text-[#a1a1aa] transition hover:border-[rgba(255,255,255,0.22)] hover:text-white duration-200 disabled:opacity-50"
+                    >
+                      {isRefreshingFashion ? "Refreshing..." : "Refresh items"}
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
