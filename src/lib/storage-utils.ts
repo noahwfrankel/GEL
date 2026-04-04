@@ -134,3 +134,49 @@ export function getInteractions(): ItemInteraction[] {
     return [];
   }
 }
+
+// ---------------------------------------------------------------------------
+// Liked items — source-specific keys
+// ---------------------------------------------------------------------------
+
+export const LIKED_NICHE_KEY = "gel_liked_items_niche";
+export const LIKED_VIBE_KEY = "gel_liked_items_vibe";
+
+export function getLikedByKey(key: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function toggleLikedByKey(itemId: string, key: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const ids = getLikedByKey(key);
+    const isLiked = ids.includes(itemId);
+    const updated = isLiked ? ids.filter((id) => id !== itemId) : [...ids, itemId];
+    localStorage.setItem(key, JSON.stringify(updated));
+    return !isLiked;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Last aesthetic label (shown on What's New splash)
+// ---------------------------------------------------------------------------
+
+export const LAST_AESTHETIC_KEY = "gel_last_aesthetic_label";
+
+export function setLastAestheticLabel(label: string): void {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(LAST_AESTHETIC_KEY, label); } catch { /* ignore */ }
+}
+
+export function getLastAestheticLabel(): string | null {
+  if (typeof window === "undefined") return null;
+  try { return localStorage.getItem(LAST_AESTHETIC_KEY); } catch { return null; }
+}

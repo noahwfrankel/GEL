@@ -1,216 +1,249 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BottomNav } from "@/components/BottomNav";
-import {
-  SPOTIFY_DATA_STORAGE_KEY,
-  type StoredArtist,
-} from "@/lib/spotify-api";
+import { SPOTIFY_DATA_STORAGE_KEY, type StoredArtist } from "@/lib/spotify-api";
 import { safeGetItem } from "@/lib/storage-utils";
 
-type AestheticResponse = {
-  aesthetic_label: string;
-  description: string;
-  colors: string[];
-  key_garments: string[];
-  ebay_search_keywords: string[];
-};
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
-type GenreRow = {
+type GenreNode = {
+  id: string;
   genre: string;
-  artists: string[];
+  topArtist: string;
+  count: number;
+  x: number;
+  y: number;
+  r: number;
+  color: string;
 };
 
-type CardState =
-  | { status: "idle" | "loading" }
-  | { status: "error" }
-  | { status: "ok"; data: AestheticResponse };
+type SpotifyDataShape = {
+  topArtists?: { short_term?: unknown; medium_term?: unknown; long_term?: unknown };
+};
 
-const AESTHETIC_ENDPOINT = "https://web-production-78bf0.up.railway.app/aesthetic/from-genre";
-const CLOSET_CACHE_PREFIX = "gel_closet_aesthetic_";
-const CLOSET_FETCHED_AT_PREFIX = "gel_closet_aesthetic_fetched_at_";
-const STALE_MS = 24 * 60 * 60 * 1000;
+type SavedCounts = Record<string, number>;
 
-const CARD_GRADIENTS = [
-  { color1: "#1a0a2e", color2: "#0a0a1a" },
-  { color1: "#0a1a2e", color2: "#0a0a0a" },
-  { color1: "#0a1a12", color2: "#0a0a0a" },
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const CATEGORIES = [
+  { id: "pants",       label: "Pants",       emoji: "👖" },
+  { id: "shirts",      label: "Shirts",      emoji: "👕" },
+  { id: "hoodies",     label: "Hoodies",     emoji: "🧥" },
+  { id: "jackets",     label: "Jackets",     emoji: "🧣" },
+  { id: "sweaters",    label: "Sweaters",    emoji: "🧶" },
+  { id: "shoes",       label: "Shoes",       emoji: "👟" },
+  { id: "shorts",      label: "Shorts",      emoji: "🩳" },
+  { id: "accessories", label: "Accessories", emoji: "🕶️" },
 ] as const;
 
-function genreToStorageKey(genre: string): string {
-  return genre.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_-]/g, "") || "unknown";
+const GENRE_COLORS: Record<string, string> = {
+  "hip-hop": "#7c3aed", "rap": "#7c3aed", "trap": "#5b21b6",
+  "rock": "#dc2626", "punk": "#b91c1c", "metal": "#991b1b",
+  "electronic": "#2563eb", "house": "#1d4ed8", "techno": "#1e40af",
+  "jazz": "#d97706", "soul": "#b45309", "blues": "#92400e",
+  "pop": "#059669", "indie": "#0d9488", "alternative": "#0f766e",
+  "country": "#78350f", "folk": "#92400e", "americana": "#713f12",
+  "r&b": "#7c2d12", "funk": "#c2410c",
+};
+
+function getGenreColor(genre: string): string {
+  const g = genre.toLowerCase();
+  for (const [key, color] of Object.entries(GENRE_COLORS)) {
+    if (g.includes(key)) return color;
+  }
+  const hash = genre.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const hue = hash % 360;
+  return `hsl(${hue}, 60%, 35%)`;
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function toArtistArray(value: unknown): StoredArtist[] {
   if (Array.isArray(value)) return value as StoredArtist[];
-  if (
-    value &&
-    typeof value === "object" &&
-    "items" in value &&
-    Array.isArray((value as { items?: unknown[] }).items)
-  ) {
-    return (value as { items: StoredArtist[] }).items;
-  }
+  if (value && typeof value === "object" && "items" in value)
+    return (value as { items: StoredArtist[] }).items ?? [];
   return [];
 }
 
-type SpotifyDataShape = {
-  topArtists?: {
-    short_term?: unknown;
-    medium_term?: unknown;
-    long_term?: unknown;
-  };
-};
-
-function getTop3GenresWithArtists(data: SpotifyDataShape | null): GenreRow[] {
+function getGenreNodes(data: SpotifyDataShape | null): GenreNode[] {
   if (!data) return [];
+  const all = [
+    ...toArtistArray(data.topArtists?.short_term),
+    ...toArtistArray(data.topArtists?.medium_term),
+  ];
+  const map: Record<string, { count: number; topArtist: string }> = {};
+  for (const a of all) {
+    for (const g of (a.genres ?? [])) {
+      if (!map[g]) map[g] = { count: 0, topArtist: a.name ?? "" };
+      map[g].count += 1;
+    }
+  }
+  const sorted = Object.entries(map)
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 6);
+
+  const W = 300, H = 200;
+  const positions = [
+    [W * 0.5, H * 0.5], [W * 0.2, H * 0.25], [W * 0.8, H * 0.25],
+    [W * 0.15, H * 0.72], [W * 0.85, H * 0.72], [W * 0.5, H * 0.85],
+  ];
+
+  const maxCount = Math.max(...sorted.map(([, v]) => v.count), 1);
+
+  return sorted.map(([genre, { count, topArtist }], i) => ({
+    id: genre,
+    genre,
+    topArtist,
+    count,
+    x: positions[i]?.[0] ?? W * 0.5,
+    y: positions[i]?.[1] ?? H * 0.5,
+    r: 18 + (count / maxCount) * 18,
+    color: getGenreColor(genre),
+  }));
+}
+
+function formatGenre(g: string): string {
+  return g.split(/[\s-]+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+function getSavedCountForCategory(cat: string): number {
+  if (typeof window === "undefined") return 0;
   try {
-    const ranges = [
-      toArtistArray(data.topArtists?.short_term),
-      toArtistArray(data.topArtists?.medium_term),
-      toArtistArray(data.topArtists?.long_term),
-    ].filter((arr) => arr.length > 0);
+    const raw = localStorage.getItem(`gel_closet_${cat}`);
+    if (!raw) return 0;
+    return (JSON.parse(raw) as unknown[]).length;
+  } catch { return 0; }
+}
 
-    const genreToArtists: Record<string, Set<string>> = {};
+// ---------------------------------------------------------------------------
+// Network Graph component
+// ---------------------------------------------------------------------------
 
-    for (const range of ranges) {
-      for (const a of range) {
-        const name = a?.name?.trim() || "Unknown";
-        const genres = (a?.genres ?? []).map((g) => g.trim().toLowerCase()).filter(Boolean);
-        for (const g of genres) {
-          if (!genreToArtists[g]) genreToArtists[g] = new Set();
-          genreToArtists[g].add(name);
-        }
+function GenreNetworkGraph({ nodes, selectedGenre, onSelectGenre }: {
+  nodes: GenreNode[];
+  selectedGenre: string | null;
+  onSelectGenre: (genre: string) => void;
+}) {
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  const edges = useMemo(() => {
+    const out: [number, number][] = [];
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        if (Math.random() > 0.45) out.push([i, j]);
       }
     }
+    return out;
+  }, [nodes]);
 
-    const genreRows = Object.entries(genreToArtists)
-      .map(([genre, names]) => ({
-        genre,
-        artists: Array.from(names),
-        count: names.size,
-      }))
-      .sort((a, b) => b.count - a.count || a.genre.localeCompare(b.genre))
-      .slice(0, 3)
-      .map(({ genre, artists }) => ({ genre, artists }));
+  if (nodes.length === 0) return null;
 
-    if (genreRows.length >= 3) return genreRows;
-
-    // Fallback: artists don't have genre data — cluster short_term artists
-    // in groups of 3, using the first artist's name as the genre label.
-    const shortTerm = toArtistArray(data.topArtists?.short_term);
-    const clusters: GenreRow[] = [];
-    for (let i = 0; i < shortTerm.length && clusters.length < 3; i += 3) {
-      const cluster = shortTerm.slice(i, i + 3);
-      if (cluster.length === 0) continue;
-      clusters.push({
-        genre: cluster[0]?.name?.trim() || "Unknown",
-        artists: cluster.map((a) => a?.name?.trim() || "Unknown"),
-      });
-    }
-    return clusters;
-  } catch {
-    return [];
-  }
+  return (
+    <div className="rounded-[20px] border border-[rgba(255,255,255,0.08)] bg-[#0f0f0f] overflow-hidden mb-6">
+      <div className="px-4 pt-4 pb-2">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#52525b]">
+          Your Music Taste
+        </p>
+        <p className="text-[12px] text-[#71717a] mt-0.5">Tap a genre to filter bins</p>
+      </div>
+      <svg
+        ref={svgRef}
+        viewBox="0 0 300 220"
+        className="w-full"
+        style={{ height: 200 }}
+      >
+        {/* Edges */}
+        {edges.map(([i, j]) => {
+          const a = nodes[i]!, b = nodes[j]!;
+          const isActive = selectedGenre === a.genre || selectedGenre === b.genre;
+          return (
+            <line
+              key={`${i}-${j}`}
+              x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+              stroke={isActive ? "rgba(34,197,94,0.4)" : "rgba(255,255,255,0.06)"}
+              strokeWidth={isActive ? 1.5 : 1}
+            />
+          );
+        })}
+        {/* Nodes */}
+        {nodes.map((node) => {
+          const isSelected = selectedGenre === node.genre;
+          return (
+            <g key={node.id} onClick={() => onSelectGenre(node.genre)} className="cursor-pointer">
+              <circle
+                cx={node.x} cy={node.y} r={node.r + (isSelected ? 3 : 0)}
+                fill={node.color}
+                opacity={isSelected ? 1 : 0.7}
+                stroke={isSelected ? "#22c55e" : "rgba(255,255,255,0.15)"}
+                strokeWidth={isSelected ? 2 : 1}
+              />
+              <text
+                x={node.x} y={node.y - 2}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize={node.r > 28 ? 9 : 8}
+                fill="white"
+                fontWeight="600"
+              >
+                {formatGenre(node.genre).split(" ")[0]}
+              </text>
+              <text
+                x={node.x} y={node.y + 9}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize={7}
+                fill="rgba(255,255,255,0.6)"
+              >
+                {node.topArtist.split(" ")[0]}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
 }
 
-function formatGenreLabel(genre: string): string {
-  return genre
-    .split(/[\s-]+/)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
-}
-
-function isCssColor(value: string): boolean {
-  if (typeof window === "undefined") return false;
-  const el = new Option().style;
-  el.color = "";
-  el.color = value;
-  return el.color !== "";
-}
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
 
 export default function BuildMyClosetPage() {
   const [mounted, setMounted] = useState(false);
-  const [rows, setRows] = useState<GenreRow[]>([]);
-  const [cards, setCards] = useState<CardState[]>([]);
+  const [nodes, setNodes] = useState<GenreNode[]>([]);
+  const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
+  const [savedCounts, setSavedCounts] = useState<SavedCounts>({});
+  const [topGenre, setTopGenre] = useState("");
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     if (!mounted) return;
-    const spotifyData = safeGetItem<SpotifyDataShape>(SPOTIFY_DATA_STORAGE_KEY);
-    const top = getTop3GenresWithArtists(spotifyData);
-    setRows(top);
-    setCards(top.map(() => ({ status: "idle" })));
+    const data = safeGetItem<SpotifyDataShape>(SPOTIFY_DATA_STORAGE_KEY);
+    const genreNodes = getGenreNodes(data);
+    setNodes(genreNodes);
+    if (genreNodes[0]) setTopGenre(genreNodes[0].genre);
+
+    const counts: SavedCounts = {};
+    for (const cat of CATEGORIES) {
+      counts[cat.id] = getSavedCountForCategory(cat.id);
+    }
+    setSavedCounts(counts);
   }, [mounted]);
 
-  const fetchCard = useCallback(async (index: number, row: GenreRow, forceRefresh: boolean) => {
-    const key = genreToStorageKey(row.genre);
-    const cacheKey = `${CLOSET_CACHE_PREFIX}${key}`;
-    const fetchedAtKey = `${CLOSET_FETCHED_AT_PREFIX}${key}`;
+  const activeGenre = selectedGenre ?? topGenre;
 
-    setCards((prev) => {
-      const next = [...prev];
-      next[index] = { status: "loading" };
-      return next;
-    });
-
-    try {
-      if (!forceRefresh && typeof window !== "undefined") {
-        const cached = localStorage.getItem(cacheKey);
-        const fetchedAtRaw = localStorage.getItem(fetchedAtKey);
-        const fetchedAt = fetchedAtRaw ? parseInt(fetchedAtRaw, 10) : NaN;
-        const isFresh = Number.isFinite(fetchedAt) && Date.now() - fetchedAt <= STALE_MS;
-        if (cached && isFresh) {
-          const data = JSON.parse(cached) as AestheticResponse;
-          setCards((prev) => {
-            const next = [...prev];
-            next[index] = { status: "ok", data };
-            return next;
-          });
-          return;
-        }
-      }
-
-      const artistsForApi = row.artists.slice(0, 25);
-      const res = await fetch(AESTHETIC_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ genre: row.genre, artists: artistsForApi }),
-      });
-
-      if (!res.ok) throw new Error(`Aesthetic failed: ${res.status}`);
-
-      const data = (await res.json()) as AestheticResponse;
-
-      if (typeof window !== "undefined") {
-        localStorage.setItem(cacheKey, JSON.stringify(data));
-        localStorage.setItem(fetchedAtKey, Date.now().toString());
-      }
-
-      setCards((prev) => {
-        const next = [...prev];
-        next[index] = { status: "ok", data };
-        return next;
-      });
-    } catch {
-      setCards((prev) => {
-        const next = [...prev];
-        next[index] = { status: "error" };
-        return next;
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!mounted || rows.length === 0) return;
-    rows.forEach((row, i) => {
-      void fetchCard(i, row, false);
-    });
-  }, [mounted, rows, fetchCard]);
+  function handleNodeClick(genre: string) {
+    setSelectedGenre((prev) => (prev === genre ? null : genre));
+  }
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] px-5 pt-6 pb-24">
@@ -230,108 +263,61 @@ export default function BuildMyClosetPage() {
           </h1>
         </header>
 
-        <p className="text-[15px] text-[#a1a1aa] mb-6">
-          Your top genres from Spotify, decoded into closet aesthetics
-        </p>
+        {/* Network graph */}
+        {mounted && nodes.length > 0 && (
+          <GenreNetworkGraph
+            nodes={nodes}
+            selectedGenre={selectedGenre}
+            onSelectGenre={handleNodeClick}
+          />
+        )}
 
+        {/* Active genre label */}
+        {mounted && activeGenre && (
+          <p className="text-[13px] text-[#a1a1aa] mb-4">
+            Showing picks for{" "}
+            <span className="text-white font-medium">{formatGenre(activeGenre)}</span>
+            {selectedGenre && (
+              <button
+                type="button"
+                onClick={() => setSelectedGenre(null)}
+                className="ml-2 text-[#52525b] hover:text-[#a1a1aa]"
+              >
+                ✕
+              </button>
+            )}
+          </p>
+        )}
+
+        {/* Category bins grid */}
         {!mounted ? (
-          <div className="space-y-3">
-            {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="h-[180px] rounded-[20px] bg-[#141414] border border-[rgba(255,255,255,0.08)] animate-pulse-skeleton"
-              />
+          <div className="grid grid-cols-2 gap-3">
+            {CATEGORIES.map((c) => (
+              <div key={c.id} className="h-[100px] rounded-xl bg-[#141414] border border-[rgba(255,255,255,0.08)] animate-pulse-skeleton" />
             ))}
           </div>
-        ) : rows.length === 0 ? (
-          <p className="text-[15px] text-[#a1a1aa] py-8 text-center">
-            Connect Spotify and listen to music to see your top genres here.
-          </p>
         ) : (
-          <div className="space-y-4">
-            {rows.map((row, i) => {
-              const state = cards[i] ?? { status: "idle" };
-              const grad = CARD_GRADIENTS[i % CARD_GRADIENTS.length]!;
+          <div className="grid grid-cols-2 gap-3">
+            {CATEGORIES.map((cat) => {
+              const count = savedCounts[cat.id] ?? 0;
               return (
-                <div
-                  key={row.genre}
-                  className="rounded-[20px] overflow-hidden border border-[rgba(255,255,255,0.08)]"
-                  style={{
-                    background: `linear-gradient(135deg, ${grad.color1} 0%, ${grad.color2} 100%)`,
-                  }}
+                <Link
+                  key={cat.id}
+                  href={`/build-my-closet/bin/${cat.id}?genre=${encodeURIComponent(activeGenre)}`}
+                  className="relative flex flex-col items-center justify-center h-[100px] rounded-xl border border-[rgba(255,255,255,0.08)] bg-[#141414] transition hover:border-[rgba(255,255,255,0.2)] hover:bg-[#1c1c1c] duration-200"
                 >
-                  <div className="p-5">
-                    <span className="inline-block rounded-full border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.08)] px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-[#a1a1aa]">
-                      {formatGenreLabel(row.genre)}
+                  {count > 0 && (
+                    <span className="absolute top-2 right-2 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#22c55e] px-1 text-[10px] font-bold text-black">
+                      {count}
                     </span>
-
-                    {state.status === "loading" || state.status === "idle" ? (
-                      <div className="mt-6 flex flex-col items-center py-6">
-                        <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-white animate-spin" />
-                        <p className="mt-3 text-[13px] text-[#a1a1aa]">Decoding the vibe...</p>
-                      </div>
-                    ) : state.status === "error" ? (
-                      <div className="mt-6 text-center py-4">
-                        <p className="text-[14px] text-[#a1a1aa]">Could not load this aesthetic.</p>
-                        <button
-                          type="button"
-                          onClick={() => fetchCard(i, row, true)}
-                          className="mt-3 h-9 rounded-lg bg-[#22c55e] px-4 text-[13px] font-semibold text-black"
-                        >
-                          Retry
-                        </button>
-                      </div>
-                    ) : state.status === "ok" ? (
-                      <>
-                        <h2 className="mt-4 text-[24px] font-extrabold tracking-tight text-white leading-tight">
-                          {state.data.aesthetic_label}
-                        </h2>
-                        <p className="mt-2 text-[14px] text-[#a1a1aa] leading-relaxed">
-                          {state.data.description}
-                        </p>
-                        <div className="mt-4 flex flex-wrap gap-1.5">
-                          {(state.data.colors ?? []).slice(0, 6).map((color) => {
-                            const valid = isCssColor(color);
-                            return (
-                              <span
-                                key={color}
-                                className={`rounded-full px-2.5 py-0.5 text-[11px] border ${
-                                  valid
-                                    ? "border-white/20 text-black"
-                                    : "border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.35)] text-white"
-                                }`}
-                                style={valid ? { backgroundColor: color } : undefined}
-                              >
-                                {color}
-                              </span>
-                            );
-                          })}
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-1.5">
-                          {(state.data.key_garments ?? []).slice(0, 4).map((g) => (
-                            <span
-                              key={g}
-                              className="rounded-full border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-2.5 py-1 text-[11px] text-white"
-                            >
-                              {g}
-                            </span>
-                          ))}
-                        </div>
-                        <Link
-                          href={`/build-my-closet/results?genre=${encodeURIComponent(row.genre)}`}
-                          className="mt-4 inline-flex h-10 items-center rounded-xl bg-[#22c55e] px-4 text-[13px] font-semibold text-black transition hover:bg-[#22c55e]/90 duration-200"
-                        >
-                          Explore This Aesthetic
-                        </Link>
-                      </>
-                    ) : null}
-                  </div>
-                </div>
+                  )}
+                  <span className="text-[28px] mb-1">{cat.emoji}</span>
+                  <span className="text-[13px] font-medium text-white">{cat.label}</span>
+                </Link>
               );
             })}
           </div>
         )}
-
       </div>
 
       <BottomNav />

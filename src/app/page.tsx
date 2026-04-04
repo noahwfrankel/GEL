@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { SpotifyLoginButton } from "@/components/spotify-login-button";
 import { TOKEN_STORAGE_KEY, SPOTIFY_DATA_STORAGE_KEY } from "@/lib/spotify-api";
 import type { SpotifyData } from "@/lib/spotify-api";
+import { getLastAestheticLabel } from "@/lib/storage-utils";
 
 const SPOTIFY_CONNECTED_KEY = "gel_spotify_connected";
 const LAST_VISIT_KEY = "gel_last_visit";
@@ -27,44 +28,66 @@ function getTopArtistNames(): string[] {
 }
 
 function WhatsNewSplash({ onContinue }: { onContinue: () => void }) {
-  const [visible, setVisible] = useState(true);
-  const artists = getTopArtistNames();
+  const [visible, setVisible] = useState(false);
+  const topArtists = getTopArtistNames();
+  const lastAesthetic = getLastAestheticLabel();
 
   useEffect(() => {
-    const timer = setTimeout(() => {
+    // Fade in
+    const fadeIn = setTimeout(() => setVisible(true), 50);
+    // Auto-dismiss after 2.5s
+    const dismiss = setTimeout(() => {
       setVisible(false);
-      setTimeout(onContinue, 400); // wait for fade-out
-    }, 3000);
-    return () => clearTimeout(timer);
+      setTimeout(onContinue, 400);
+    }, 2500 + 800); // 800ms for fade-in
+    return () => { clearTimeout(fadeIn); clearTimeout(dismiss); };
   }, [onContinue]);
 
-  const artistText =
-    artists.length >= 2
-      ? `${artists.slice(0, -1).join(", ")} and ${artists[artists.length - 1]}`
-      : artists[0] ?? "your top artists";
+  const topArtist = topArtists[0] ?? null;
+
+  let message: string;
+  if (topArtist && lastAesthetic) {
+    message = `You've been deep in ${topArtist} lately. Your ${lastAesthetic} picks have been updated.`;
+  } else if (topArtist) {
+    message = `You've been deep in ${topArtist} lately. New picks are waiting.`;
+  } else {
+    message = "Your music taste has evolved. New picks are waiting.";
+  }
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0a0a0a] px-8 text-center transition-opacity duration-400 ${
+      className={`fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0a0a0a] px-8 text-center transition-opacity duration-[800ms] ${
         visible ? "opacity-100" : "opacity-0"
       }`}
-      onClick={() => {
-        setVisible(false);
-        setTimeout(onContinue, 400);
-      }}
+      onClick={() => { setVisible(false); setTimeout(onContinue, 400); }}
     >
-      <span className="text-[13px] font-medium uppercase tracking-[0.15em] text-[#22c55e] mb-4">
+      {/* Pulsing background dots */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {[0.2, 0.5, 0.8].map((x) =>
+          [0.3, 0.6].map((y) => (
+            <div
+              key={`${x}-${y}`}
+              className="absolute rounded-full bg-[#22c55e]/5 animate-ping"
+              style={{
+                left: `${x * 100}%`,
+                top: `${y * 100}%`,
+                width: 120,
+                height: 120,
+                transform: "translate(-50%,-50%)",
+                animationDuration: `${2 + x}s`,
+                animationDelay: `${y}s`,
+              }}
+            />
+          ))
+        )}
+      </div>
+
+      <span className="text-[13px] font-medium uppercase tracking-[0.15em] text-[#22c55e] mb-5">
         Welcome back
       </span>
-      {artists.length > 0 ? (
-        <p className="text-[22px] font-bold tracking-[-0.4px] text-white leading-[1.3] max-w-[300px]">
-          You&apos;ve been listening to a lot of {artistText} lately. Your recommendations have been updated.
-        </p>
-      ) : (
-        <p className="text-[22px] font-bold tracking-[-0.4px] text-white leading-[1.3] max-w-[300px]">
-          Your recommendations have been updated.
-        </p>
-      )}
+      <p className="text-[22px] font-bold tracking-[-0.4px] text-white leading-[1.35] max-w-[300px]">
+        {message}
+      </p>
       <p className="mt-8 text-[13px] text-[#52525b]">Tap to continue</p>
     </div>
   );

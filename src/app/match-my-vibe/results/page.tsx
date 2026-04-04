@@ -18,9 +18,13 @@ import {
   getSeenItemIds,
   addSeenItemIds,
   trackInteraction,
+  toggleLikedByKey,
+  getLikedByKey,
+  LIKED_VIBE_KEY,
+  setLastAestheticLabel,
   type FashionItem,
 } from "@/lib/storage-utils";
-import { ProductCard, itemStableId } from "@/components/ProductCard";
+import { itemStableId } from "@/components/ProductCard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,6 +36,8 @@ type AestheticResponse = {
   colors: string[];
   key_garments: string[];
   ebay_search_keywords: string[];
+  artist_influence: string[];
+  buying_push: string;
 };
 
 type FashionSearchResponse = {
@@ -193,6 +199,9 @@ function MatchMyVibeResultsContent() {
   const [isFashionLoading, setIsFashionLoading] = useState(false);
   const [isRefreshingFashion, setIsRefreshingFashion] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedVibeIds, setSavedVibeIds] = useState<Set<string>>(() =>
+    typeof window !== "undefined" ? new Set(getLikedByKey(LIKED_VIBE_KEY)) : new Set()
+  );
 
   const fetchFashion = useCallback(
     async (keywords: string[], forceRefresh: boolean) => {
@@ -393,6 +402,7 @@ function MatchMyVibeResultsContent() {
         const payload = (await aestheticRes.json()) as AestheticResponse;
         console.log("[Match My Vibe] Aesthetic loaded:", payload.aesthetic_label);
         setResult(payload);
+        setLastAestheticLabel(payload.aesthetic_label);
         setPhase("done");
 
         if (typeof window !== "undefined") {
@@ -442,6 +452,26 @@ function MatchMyVibeResultsContent() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] px-5 pb-12 pt-6">
+      {/* Sticky refresh button */}
+      {result && !isLoading && (
+        <button
+          type="button"
+          onClick={() => void handleRefreshFashion()}
+          disabled={isRefreshingFashion}
+          className="fixed top-4 right-4 z-30 flex items-center gap-1.5 h-9 rounded-full border border-[rgba(255,255,255,0.12)] bg-[#141414]/90 px-3 text-[12px] text-[#a1a1aa] backdrop-blur-sm transition hover:text-white disabled:opacity-50"
+        >
+          {isRefreshingFashion ? (
+            <svg className="h-3.5 w-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          ) : (
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          )}
+          {isRefreshingFashion ? "Refreshing" : "Refresh"}
+        </button>
+      )}
       <div className="mx-auto max-w-md">
         <header className="flex items-center gap-4 mb-8">
           <Link
@@ -449,18 +479,8 @@ function MatchMyVibeResultsContent() {
             className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1c1c1c] border border-[rgba(255,255,255,0.08)] text-white transition hover:border-[rgba(255,255,255,0.22)] duration-200"
             aria-label="Back to Match My Vibe"
           >
-            <svg
-              className="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
-              />
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </Link>
         </header>
@@ -531,32 +551,94 @@ function MatchMyVibeResultsContent() {
             )}
 
             {isFashionLoading ? (
-              <ProductSkeletonGrid />
+              <div className="space-y-3 mt-8">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-[280px] rounded-xl bg-[#141414] border border-[rgba(255,255,255,0.08)] animate-pulse-skeleton" />
+                ))}
+              </div>
             ) : (
-              <>
-                <div className="grid grid-cols-2 gap-3 mt-8">
-                  {fashionItems.map((item) => (
-                    <ProductCard
-                      key={itemStableId(item)}
-                      item={item}
-                      genre={playlistName}
-                      source="match_my_vibe"
-                    />
-                  ))}
-                </div>
-                {fashionItems.length > 0 && (
-                  <div className="mt-4 flex justify-center">
-                    <button
-                      type="button"
-                      onClick={() => void handleRefreshFashion()}
-                      disabled={isRefreshingFashion}
-                      className="h-9 rounded-xl border border-[rgba(255,255,255,0.12)] bg-transparent px-4 text-[13px] text-[#a1a1aa] transition hover:border-[rgba(255,255,255,0.22)] hover:text-white duration-200 disabled:opacity-50"
+              <div className="space-y-3 mt-8">
+                {fashionItems.map((item) => {
+                  const id = itemStableId(item);
+                  const isSaved = savedVibeIds.has(id);
+                  return (
+                    <div
+                      key={id}
+                      className="flex h-[280px] overflow-hidden rounded-xl border border-[rgba(255,255,255,0.08)] bg-[#141414] transition hover:border-[rgba(255,255,255,0.16)]"
                     >
-                      {isRefreshingFashion ? "Refreshing..." : "Refresh items"}
-                    </button>
-                  </div>
-                )}
-              </>
+                      {/* Left: photo */}
+                      <div className="w-[40%] flex-shrink-0 relative">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={item.image_url}
+                          alt={item.title}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      {/* Right: details */}
+                      <div className="flex flex-col flex-1 p-4 min-w-0">
+                        <p className="text-[14px] font-medium text-white leading-snug line-clamp-3 flex-shrink-0">
+                          {item.title}
+                        </p>
+                        <p className="mt-2 text-[20px] font-bold text-[#22c55e] flex-shrink-0">
+                          ${item.price.toFixed(2)}
+                        </p>
+                        <p className="text-[11px] text-[#71717a] flex-shrink-0">
+                          {item.condition || "Pre-owned"}
+                        </p>
+                        <div className="flex-1" />
+                        <div className="flex items-center gap-2 mt-3">
+                          <a
+                            href={item.item_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => trackInteraction({
+                              item_id: id, item_title: item.title,
+                              genre: playlistName, action: "clicked",
+                              timestamp: Date.now(), price: item.price,
+                              source: "match_my_vibe", image_url: item.image_url,
+                              item_url: item.item_url, condition: item.condition,
+                            })}
+                            className="flex-1 flex h-9 items-center justify-center rounded-lg bg-[#22c55e] text-[12px] font-semibold text-black"
+                          >
+                            View →
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newSaved = toggleLikedByKey(id, LIKED_VIBE_KEY);
+                              setSavedVibeIds((prev) => {
+                                const next = new Set(prev);
+                                if (newSaved) next.add(id);
+                                else next.delete(id);
+                                return next;
+                              });
+                              trackInteraction({
+                                item_id: id, item_title: item.title,
+                                genre: playlistName, action: newSaved ? "liked" : "dismissed",
+                                timestamp: Date.now(), price: item.price,
+                                source: "match_my_vibe", image_url: item.image_url,
+                                item_url: item.item_url, condition: item.condition,
+                              });
+                            }}
+                            className={`flex h-9 w-9 items-center justify-center rounded-lg border transition ${
+                              isSaved
+                                ? "border-[#22c55e] text-[#22c55e]"
+                                : "border-[rgba(255,255,255,0.12)] text-white"
+                            }`}
+                            aria-label={isSaved ? "Remove" : "Save"}
+                          >
+                            <svg className="h-4 w-4" fill={isSaved ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3a2 2 0 012 2c0 .74-.4 1.38-1 1.73V8l7 5.5H4L11 8V6.73A2 2 0 0112 3z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4 13.5V17a2 2 0 002 2h12a2 2 0 002-2v-3.5" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </>
         )}
